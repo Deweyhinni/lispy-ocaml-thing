@@ -1,0 +1,16 @@
+[package]
+name = "silly-lisp-thing"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "silly_list_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "silly_list_bin"
+path = "src/bin.rs"
+
+[dependencies]
+anyhow = "1.0.100"
+serde = { version = "1.0.228", features = ["derive"] }

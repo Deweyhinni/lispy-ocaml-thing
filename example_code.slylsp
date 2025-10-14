@@ -1,0 +1,21 @@
+(let meow s = (print s))
+
+(let meows = (["meow" "mrow" "mjá" "ニャー"]))
+
+(let floats = ([3.14 2.72 6.9 3.141592653589]))
+
+(let nums = ([2001 1984 2000 1 0 -1 -154 3 1024]))
+
+(let units = ([() () () ()]))
+
+(let lone_unit = ([()]))
+
+(let idk =
+  let m = (meows)
+  in
+  (print m)
+)
+
+(let arrow_add = (fn x -> (fn y -> (+ x y))))
+
+(let () = (meow "hello"))
