@@ -27,18 +27,41 @@ impl SyntaxTree {
                     .iter()
                     .position(|t| t == &Token::Operator(Operator::Eq))
                 {
-                    let mut params: Vec<tokenizer::Token> = Vec::new();
+                    let mut params: Vec<Identifier> = Vec::new();
                     for t in rest[..eq_pos].iter() {
-                        if let Token::Identifier(_) = t {
-                            params.push(t.clone());
+                        if let Token::Identifier(name) = t {
+                            params.push(Identifier::FuncParam {
+                                name: name.to_string(),
+                                typ: None,
+                            });
                         } else {
                             return Err(anyhow::anyhow!(
-                                "function decleration params contain non-identifier"
+                                "function declaration params contain non-identifier"
                             ));
                         }
                     }
+
+                    let expr = Expression::from_tokens(&rest[(eq_pos + 1)..]).map_err(|e| {
+                        e.context("unable to get expression when defining function")
+                    })?;
+
+                    let f = Func {
+                        params,
+                        body: expr,
+                        ret: None,
+                    };
+
+                    let fn_ident = Identifier::FuncDef {
+                        name: fn_name.clone(),
+                        value: f,
+                    };
+
+                    let decl = Declaration::Func(fn_ident);
+
+                    Ok(Item::Declaration(decl))
+                } else {
+                    Err(anyhow::anyhow!("could not create declaration"))
                 }
-                todo!()
             }
 
             _ => todo!(),
@@ -49,12 +72,10 @@ impl SyntaxTree {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Item {
     Declaration(Declaration),
-    Expression(Expression),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Declaration {
-    Var(Identifier),
     Func(Identifier),
 }
 
@@ -65,26 +86,29 @@ pub struct Expression {
 }
 
 impl Expression {
+    /// creates an expression from tokens, either with local variables or just a basic expression
     fn from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
-        let mut vars: Vec<Token> = Vec::new();
         if let Some(Token::Keyword(Keyword::Let)) = tokens.get(0) {
-            let expression_vars = match tokens {
-                [start @ .., Token::Keyword(Keyword::In)] => {
-                    let mut vars: Vec<Identifier> = Vec::new();
-                    let vars_tokens = split_with_prefix(start, &Token::Keyword(Keyword::Let));
-                    for vts in vars_tokens {
-                        let var = Self::var_from_tokens(&vts[..]).map_err(|e| {
-                            e.context("unable to get variable in expression definition")
-                        })?;
-                        vars.push(var);
-                    }
+            let in_pos = tokens
+                .iter()
+                .position(|t| t == &Token::Keyword(Keyword::In))
+                .ok_or(anyhow::anyhow!("no 'in' token after let declaration"))?;
 
-                    vars
+            let expression_vars = {
+                let mut vars: Vec<Identifier> = Vec::new();
+                let vars_tokens =
+                    split_with_prefix(&tokens[..in_pos], &Token::Keyword(Keyword::Let));
+                for vts in vars_tokens {
+                    let var = Self::var_from_tokens(&vts[..]).map_err(|e| {
+                        e.context("unable to get variable in expression definition")
+                    })?;
+                    vars.push(var);
                 }
-                _ => todo!(),
+
+                vars
             };
 
-            let expression_body = match tokens {
+            let expression_body = match &tokens[in_pos..] {
                 [
                     Token::Keyword(Keyword::In),
                     Token::LParen,
@@ -113,6 +137,8 @@ impl Expression {
         }
     }
 
+    /// creates a variable definition from tokens representing an expression variable definition,
+    /// this works on one definition at a time and can't have the 'in' token at the end
     fn var_from_tokens(tokens: &[Token]) -> anyhow::Result<Identifier> {
         match tokens {
             [
@@ -120,17 +146,65 @@ impl Expression {
                 Token::Identifier(name),
                 Token::Operator(Operator::Eq),
                 expression @ ..,
-                Token::RParen,
+                // Token::RParen,
             ] => {
                 let expr = Self::from_tokens(expression)
                     .map_err(|e| e.context("unable to get expression in variable declaration"))?;
-                Ok(Identifier::Var {
+                Ok(Identifier::VarDef {
                     name: name.clone(),
                     value: expr,
                 })
             }
 
             _ => Err(anyhow::anyhow!("{tokens:#?} is not a variable declaration")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum ExpressionBody {
+    Operation(Box<Operation>),
+    FuncCall {
+        func: Box<Identifier>,
+        params: Vec<Expression>,
+    },
+    Literal(Box<Literal>),
+    Identifier(Box<Identifier>),
+    Expression(Box<Expression>),
+}
+
+impl ExpressionBody {
+    /// creates an expression body from tokens representing an expression body inside parenthesis
+    /// but the parentheis must not be included
+    fn from_tokens(tokens: &[Token]) -> anyhow::Result<ExpressionBody> {
+        if let Ok(expr) = Expression::from_tokens(tokens) {
+            Ok(Self::Expression(Box::new(expr)))
+        } else if tokens.len() == 1 {
+            if let Some(l) = Literal::from_token(
+                tokens
+                    .get(0)
+                    .expect("length checked but still unable to get token"),
+            ) {
+                Ok(Self::Literal(Box::new(l)))
+            } else if let Token::Identifier(name) = tokens
+                .get(0)
+                .expect("length checked but still unable to get token")
+            {
+                Ok(Self::Identifier(Box::new(Identifier::VarRef {
+                    name: name.clone(),
+                })))
+            } else {
+                todo!()
+            }
+        } else if tokens.is_empty() {
+            Ok(Self::Literal(Box::new(Literal {
+                typ: Type::Unit,
+                value: TypeValue::Unit,
+            })))
+        } else {
+            Err(anyhow::anyhow!(
+                "cannot create expression body from {tokens:?}"
+            ))
         }
     }
 }
@@ -151,7 +225,7 @@ mod expression_tests {
 
         assert_eq!(
             var,
-            Identifier::Var {
+            Identifier::VarDef {
                 name: "meow".into(),
                 value: Expression {
                     local_vars: Vec::new(),
@@ -182,55 +256,78 @@ mod expression_tests {
             }
         )
     }
-}
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub enum ExpressionBody {
-    Operation(Box<Operation>),
-    FuncCall {
-        func: Box<Identifier>,
-        params: Vec<Expression>,
-    },
-    Literal(Box<Literal>),
-    Identifier(Box<Identifier>),
-    Expression(Box<Expression>),
-    Unit,
-}
+    #[test]
+    fn test_ident_expression() {
+        let tokens = tokenizer::TokenList::generate(
+            "let meow = (14) let woof = (\"bork\") in (meow)".into(),
+        )
+        .unwrap();
+        let expr = Expression::from_tokens(&tokens.tokens()).unwrap();
 
-impl ExpressionBody {
-    fn from_tokens(tokens: &[Token]) -> anyhow::Result<ExpressionBody> {
-        if let Ok(expr) = Expression::from_tokens(tokens) {
-            Ok(Self::Expression(Box::new(expr)))
-        } else if tokens.len() == 1 {
-            if let Some(l) = Literal::from_token(
-                tokens
-                    .get(0)
-                    .expect("length checked but still unable to get token"),
-            ) {
-                Ok(Self::Literal(Box::new(l)))
-            } else {
-                todo!("identifier expression")
+        println! {"{:#?}", expr};
+
+        assert_eq!(
+            expr,
+            Expression {
+                local_vars: vec![
+                    Identifier::VarDef {
+                        name: String::from("meow"),
+                        value: Expression {
+                            local_vars: Vec::new(),
+                            expression_body: ExpressionBody::Literal(Box::new(Literal {
+                                typ: Type::Int,
+                                value: TypeValue::Int(14)
+                            }))
+                        }
+                    },
+                    Identifier::VarDef {
+                        name: String::from("woof"),
+                        value: Expression {
+                            local_vars: Vec::new(),
+                            expression_body: ExpressionBody::Literal(Box::new(Literal {
+                                typ: Type::String,
+                                value: TypeValue::String("bork".into())
+                            }))
+                        }
+                    }
+                ],
+                expression_body: ExpressionBody::Identifier(Box::new(Identifier::VarRef {
+                    name: String::from("meow")
+                }))
             }
-        } else {
-            Err(anyhow::anyhow!(
-                "cannot create expression body from {tokens:?}"
-            ))
-        }
+        )
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Identifier {
-    Func { name: String, value: Func },
-    FuncParam { name: String, typ: Type },
-    Var { name: String, value: Expression },
+    FuncDef {
+        name: String,
+        value: Func,
+    },
+    FuncParam {
+        name: String,
+        typ: Option<Type>,
+    },
+    FuncCall {
+        name: String,
+        params: Vec<Expression>,
+    },
+    VarDef {
+        name: String,
+        value: Expression,
+    },
+    VarRef {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Func {
     params: Vec<Identifier>,
     body: Expression,
-    ret: Type,
+    ret: Option<Type>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
