@@ -1,8 +1,10 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::{cmp::PartialEq, thread::current};
+use std::{cmp::PartialEq, iter, thread::current};
 
 use crate::tokenizer::{self, Keyword, Operator, Token, TokenList};
+
+mod tests;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SyntaxTree {
@@ -159,23 +161,60 @@ impl Expression {
             _ => Err(anyhow::anyhow!("{tokens:#?} is not a variable declaration")),
         }
     }
+
+    /// finds and creates multiple expressions as a list for when you have multiple expressions in
+    /// a row in operations or function calls.
+    /// must only include valid expressions seperated by spaces
+    fn multiple_from_tokens(tokens: &[Token]) -> anyhow::Result<Vec<Self>> {
+        // finds the position of expression bodies
+        let body_indices: Vec<(usize, usize)> = {
+            let mut bodies = Vec::new();
+            let mut parens = Vec::new();
+            for (i, t) in tokens.iter().enumerate() {
+                if t == &Token::LParen {
+                    parens.push(i);
+                } else if t == &Token::RParen {
+                    if parens.len() == 1 {
+                        bodies.push((parens.pop().expect("length checked but unable to pop"), i));
+                    } else if parens.is_empty() {
+                        return Err(anyhow::anyhow!("parenthesis are not balanced"));
+                    } else {
+                        bodies
+                            .pop()
+                            .expect("pop returned None even though length checked");
+                    }
+                }
+            }
+
+            bodies
+        };
+
+        let mut expressions = Vec::new();
+        for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
+            if i == 0 {
+                expressions.push(Expression::from_tokens(&tokens[0..=*cidx])?);
+            } else {
+                let prev_idx = body_indices[i - 1].1;
+                expressions.push(Expression::from_tokens(&tokens[(prev_idx + 1)..=*cidx])?);
+            }
+        }
+
+        Ok(expressions)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ExpressionBody {
     Operation(Box<Operation>),
-    FuncCall {
-        func: Box<Identifier>,
-        params: Vec<Expression>,
-    },
+    FuncCall(Box<FuncCall>),
     Literal(Box<Literal>),
-    Identifier(Box<Identifier>),
+    VarRef(VarRef),
     Expression(Box<Expression>),
 }
 
 impl ExpressionBody {
     /// creates an expression body from tokens representing an expression body inside parenthesis
-    /// but the parentheis must not be included
+    /// but the parenthesis must not be included
     fn from_tokens(tokens: &[Token]) -> anyhow::Result<ExpressionBody> {
         if let Ok(expr) = Expression::from_tokens(tokens) {
             Ok(Self::Expression(Box::new(expr)))
@@ -190,9 +229,7 @@ impl ExpressionBody {
                 .get(0)
                 .expect("length checked but still unable to get token")
             {
-                Ok(Self::Identifier(Box::new(Identifier::VarRef {
-                    name: name.clone(),
-                })))
+                Ok(Self::VarRef(VarRef { name: name.clone() }))
             } else {
                 todo!()
             }
@@ -202,125 +239,39 @@ impl ExpressionBody {
                 value: TypeValue::Unit,
             })))
         } else {
-            Err(anyhow::anyhow!(
-                "cannot create expression body from {tokens:?}"
-            ))
-        }
-    }
-}
+            match tokens {
+                [Token::Identifier(ident), rest @ ..] => {
+                    let param_expressions = Expression::multiple_from_tokens(rest)?;
 
-#[cfg(test)]
-mod expression_tests {
-    use crate::{
-        ast::{Expression, ExpressionBody, Identifier, Literal, Type, TypeValue},
-        tokenizer,
-    };
-
-    #[test]
-    fn test_var_from_tokens() {
-        let tokens = crate::tokenizer::TokenList::generate("let meow = (\"meow\")".into()).unwrap();
-        let var = crate::ast::Expression::var_from_tokens(&tokens.tokens()).unwrap();
-
-        println!("{:#?}", var);
-
-        assert_eq!(
-            var,
-            Identifier::VarDef {
-                name: "meow".into(),
-                value: Expression {
-                    local_vars: Vec::new(),
-                    expression_body: ExpressionBody::Literal(Box::new(Literal {
-                        typ: Type::String,
-                        value: TypeValue::String("meow".into())
-                    }))
+                    Ok(Self::FuncCall(Box::new(FuncCall {
+                        name: ident.clone(),
+                        params: param_expressions,
+                    })))
                 }
+                _ => Err(anyhow::anyhow!(
+                    "cannot create expression body from {tokens:?}"
+                )),
             }
-        )
-    }
-
-    #[test]
-    fn test_literal_expression() {
-        let tokens = tokenizer::TokenList::generate("(\"meow\")".into()).unwrap();
-        let expr = Expression::from_tokens(&tokens.tokens()).unwrap();
-
-        println!("{:#?}", expr);
-
-        assert_eq!(
-            expr,
-            Expression {
-                local_vars: Vec::new(),
-                expression_body: ExpressionBody::Literal(Box::new(Literal {
-                    typ: Type::String,
-                    value: TypeValue::String("meow".into())
-                })),
-            }
-        )
-    }
-
-    #[test]
-    fn test_ident_expression() {
-        let tokens = tokenizer::TokenList::generate(
-            "let meow = (14) let woof = (\"bork\") in (meow)".into(),
-        )
-        .unwrap();
-        let expr = Expression::from_tokens(&tokens.tokens()).unwrap();
-
-        println! {"{:#?}", expr};
-
-        assert_eq!(
-            expr,
-            Expression {
-                local_vars: vec![
-                    Identifier::VarDef {
-                        name: String::from("meow"),
-                        value: Expression {
-                            local_vars: Vec::new(),
-                            expression_body: ExpressionBody::Literal(Box::new(Literal {
-                                typ: Type::Int,
-                                value: TypeValue::Int(14)
-                            }))
-                        }
-                    },
-                    Identifier::VarDef {
-                        name: String::from("woof"),
-                        value: Expression {
-                            local_vars: Vec::new(),
-                            expression_body: ExpressionBody::Literal(Box::new(Literal {
-                                typ: Type::String,
-                                value: TypeValue::String("bork".into())
-                            }))
-                        }
-                    }
-                ],
-                expression_body: ExpressionBody::Identifier(Box::new(Identifier::VarRef {
-                    name: String::from("meow")
-                }))
-            }
-        )
+        }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Identifier {
-    FuncDef {
-        name: String,
-        value: Func,
-    },
-    FuncParam {
-        name: String,
-        typ: Option<Type>,
-    },
-    FuncCall {
-        name: String,
-        params: Vec<Expression>,
-    },
-    VarDef {
-        name: String,
-        value: Expression,
-    },
-    VarRef {
-        name: String,
-    },
+    FuncDef { name: String, value: Func },
+    FuncParam { name: String, typ: Option<Type> },
+    VarDef { name: String, value: Expression },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FuncCall {
+    name: String,
+    params: Vec<Expression>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VarRef {
+    name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -336,7 +287,87 @@ pub enum Operation {
     Sub { lhs: Expression, rhs: Expression },
     Mul { lhs: Expression, rhs: Expression },
     Div { lhs: Expression, rhs: Expression },
-    Assign { lhs: Identifier, rhs: Expression },
+    Eq { lhs: Expression, rhs: Expression },
+}
+
+impl Operation {
+    fn from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+        match tokens {
+            [Token::Operator(o), Token::Literal(lhs), Token::Literal(rhs)] => {
+                let lhs_expr = Expression {
+                    local_vars: Vec::new(),
+                    expression_body: ExpressionBody::Literal(Box::new(
+                        Literal::from_token(&Token::Literal(lhs.clone()))
+                            .expect("creating literal failed even though token is literal"),
+                    )),
+                };
+
+                let rhs_expr = Expression {
+                    local_vars: Vec::new(),
+                    expression_body: ExpressionBody::Literal(Box::new(
+                        Literal::from_token(&Token::Literal(rhs.clone()))
+                            .expect("creating literal failed even though token is literal"),
+                    )),
+                };
+
+                Ok(match o {
+                    Operator::Add => Self::Add {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    },
+                    Operator::Sub => Self::Sub {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    },
+                    Operator::Mul => Self::Mul {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    },
+                    Operator::Div => Self::Div {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    },
+                    Operator::Eq => Self::Eq {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    },
+                })
+            }
+            [Token::Operator(o), rest @ ..] => {
+                let expressions = Expression::multiple_from_tokens(rest)?;
+                if expressions.len() == 2 {
+                    Ok(match o {
+                        Operator::Add => Self::Add {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        },
+                        Operator::Sub => Self::Sub {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        },
+                        Operator::Mul => Self::Mul {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        },
+                        Operator::Div => Self::Div {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        },
+                        Operator::Eq => Self::Eq {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        },
+                    })
+                } else {
+                    Err(anyhow::anyhow!(
+                        "number of expressions does not match operator"
+                    ))
+                }
+            }
+
+            _ => Err(anyhow::anyhow!("no operator at the start of expression")),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
