@@ -8,18 +8,76 @@ mod tests;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SyntaxTree {
-    nodes: Vec<Expression>,
+    items: Vec<Item>,
 }
 
 impl SyntaxTree {
-    pub fn generate(code: TokenList) -> Self {
-        let nodes: Vec<Expression> = Vec::new();
+    pub fn generate(code: TokenList) -> anyhow::Result<Self> {
+        let tokens = code.tokens();
+        let body_indices: Vec<(usize, usize)> = {
+            let mut bodies = Vec::new();
+            let mut parens = Vec::new();
+            for (i, t) in tokens.iter().enumerate() {
+                if t == &Token::LParen {
+                    parens.push(i);
+                } else if t == &Token::RParen {
+                    if parens.len() == 1 {
+                        bodies.push((parens.pop().expect("length checked but unable to pop"), i));
+                    } else if parens.is_empty() {
+                        return Err(anyhow::anyhow!("parenthesis are not balanced"));
+                    } else {
+                        parens
+                            .pop()
+                            .expect("pop returned None even though length checked");
+                    }
+                }
+            }
 
-        Self { nodes }
+            bodies
+        };
+
+        let mut items = Vec::new();
+
+        for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
+            if i == 0 {
+                items.push(Self::item_from_tokens(&tokens[1..=(*cidx - 1)])?);
+            } else {
+                let prev_idx = body_indices[i - 1].1;
+                items.push(Self::item_from_tokens(
+                    &tokens[(prev_idx + 2)..=(*cidx - 1)],
+                )?);
+            }
+        }
+
+        Ok(Self { items })
     }
 
-    fn item_from_tokens(tokens: Vec<Token>) -> anyhow::Result<Item> {
+    fn item_from_tokens(tokens: &[Token]) -> anyhow::Result<Item> {
         match &tokens[..] {
+            [
+                Token::Keyword(Keyword::Let),
+                Token::Literal(tokenizer::Literal::Unit),
+                Token::Operator(Operator::Eq),
+                rest @ ..,
+            ] => {
+                let expr = Expression::from_tokens(rest)
+                    .map_err(|e| e.context("unable to get expression when defining function"))?;
+
+                let f = Func {
+                    params: Vec::new(),
+                    body: expr,
+                    ret: Some(Type::Unit),
+                };
+
+                let fn_ident = Identifier::FuncDef {
+                    name: "unit".to_string(),
+                    value: f,
+                };
+
+                let decl = Declaration::Func(fn_ident);
+
+                Ok(Item::Declaration(decl))
+            }
             [
                 Token::Keyword(Keyword::Let),
                 Token::Identifier(fn_name),
@@ -66,7 +124,7 @@ impl SyntaxTree {
                 }
             }
 
-            _ => todo!(),
+            t => return Err(anyhow::anyhow!("cannot create item from {t:?}")),
         }
     }
 }
@@ -179,7 +237,7 @@ impl Expression {
                     } else if parens.is_empty() {
                         return Err(anyhow::anyhow!("parenthesis are not balanced"));
                     } else {
-                        bodies
+                        parens
                             .pop()
                             .expect("pop returned None even though length checked");
                     }
@@ -238,6 +296,10 @@ impl ExpressionBody {
                 typ: Type::Unit,
                 value: TypeValue::Unit,
             })))
+        } else if let Ok(operation) = Operation::from_tokens(tokens) {
+            Ok(Self::Operation(Box::new(operation)))
+        } else if let Ok(list) = Literal::list_from_tokens(tokens) {
+            Ok(Self::Literal(Box::new(list)))
         } else {
             match tokens {
                 [Token::Identifier(ident), rest @ ..] => {
@@ -412,6 +474,20 @@ impl Literal {
                 }),
             },
             _ => None,
+        }
+    }
+
+    fn list_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+        match tokens {
+            [Token::LBracket, middle @ .., Token::RBracket] => {
+                let expressions = Expression::multiple_from_tokens(middle)?;
+
+                Ok(Self {
+                    typ: Type::List,
+                    value: TypeValue::List(expressions),
+                })
+            }
+            t => Err(anyhow::anyhow!("could not create list from tokens {t:?}")),
         }
     }
 }

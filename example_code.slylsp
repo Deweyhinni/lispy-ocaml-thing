@@ -18,4 +18,6 @@
 
 (let arrow_add = (fn x -> (fn y -> (+ x y))))
 
+(let meow s: string = (print s))
+
 (let () = (meow "hello"))

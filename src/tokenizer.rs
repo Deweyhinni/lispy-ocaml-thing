@@ -52,6 +52,9 @@ impl TokenList {
             ['-', '>'] => {
                 tokens.push(Token::Arrow);
             }
+            [':'] => {
+                tokens.push(Token::Colon);
+            }
             w => {
                 if let Some(keyword) = Keyword::from_word(w) {
                     tokens.push(Token::Keyword(keyword));
@@ -76,6 +79,7 @@ pub enum Token {
     Identifier(String),
     Literal(Literal),
     Arrow, // ->
+    Colon, // :
     LParen,
     RParen,
     LBracket,

@@ -3,8 +3,28 @@
 use super::*;
 
 #[test]
+fn test_func_declaration() {
+    let tokens = tokenizer::TokenList::generate(
+        r#"
+        let meow s =
+            let m = ("meow")
+            in
+            (print (m) (s))
+        "#
+        .to_string(),
+    )
+    .unwrap();
+
+    let func = SyntaxTree::item_from_tokens(&tokens.tokens()).unwrap();
+
+    println!("{:#?}", func);
+
+    panic!()
+}
+
+#[test]
 fn test_operator_parsing() {
-    let tokens = tokenizer::TokenList::generate("+ (2) (4)".to_string()).unwrap();
+    let tokens = tokenizer::TokenList::generate("+ 2 4".to_string()).unwrap();
     let operation = Operation::from_tokens(&tokens.tokens()).unwrap();
 
     println!("{:#?}", operation);
