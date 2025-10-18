@@ -1,6 +1,6 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::{cmp::PartialEq, iter, thread::current};
+use std::{cmp::PartialEq, env::ArgsOs, iter, thread::current};
 
 use crate::tokenizer::{self, Keyword, Operator, Token, TokenList};
 
@@ -96,7 +96,7 @@ impl SyntaxTree {
                             });
                         } else {
                             return Err(anyhow::anyhow!(
-                                "function declaration params contain non-identifier"
+                                "function declaration params contain non-identifier: {t:?}"
                             ));
                         }
                     }
@@ -268,6 +268,8 @@ pub enum ExpressionBody {
     Literal(Box<Literal>),
     VarRef(VarRef),
     Expression(Box<Expression>),
+    List(Vec<Expression>),
+    Func(Box<Func>),
 }
 
 impl ExpressionBody {
@@ -298,8 +300,10 @@ impl ExpressionBody {
             })))
         } else if let Ok(operation) = Operation::from_tokens(tokens) {
             Ok(Self::Operation(Box::new(operation)))
-        } else if let Ok(list) = Literal::list_from_tokens(tokens) {
-            Ok(Self::Literal(Box::new(list)))
+        } else if let Ok(list) = Self::list_from_tokens(tokens) {
+            Ok(list)
+        } else if let Ok(func) = Self::func_from_tokens(tokens) {
+            Ok(func)
         } else {
             match tokens {
                 [Token::Identifier(ident), rest @ ..] => {
@@ -314,6 +318,55 @@ impl ExpressionBody {
                     "cannot create expression body from {tokens:?}"
                 )),
             }
+        }
+    }
+
+    fn list_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+        match tokens {
+            [Token::LBracket, middle @ .., Token::RBracket] => {
+                let expressions = Expression::multiple_from_tokens(middle)?;
+
+                Ok(Self::List(expressions))
+            }
+            t => Err(anyhow::anyhow!("could not create list from tokens {t:?}")),
+        }
+    }
+
+    fn func_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+        println!("{tokens:?}");
+        match tokens {
+            [Token::Keyword(Keyword::Fn), rest @ ..] => {
+                if let Some(arrow_pos) = rest.iter().position(|t| t == &Token::Arrow) {
+                    let params = {
+                        let mut params = Vec::new();
+                        for t in &rest[..arrow_pos] {
+                            if let Token::Identifier(n) = t {
+                                params.push(Identifier::FuncParam {
+                                    name: n.to_string(),
+                                    typ: None,
+                                });
+                            } else {
+                                return Err(anyhow::anyhow!(
+                                    "non-identifier in fn definition: {t:?}"
+                                ));
+                            }
+                        }
+
+                        params
+                    };
+
+                    let expr = Expression::from_tokens(&rest[(arrow_pos + 1)..])?;
+
+                    Ok(Self::Func(Box::new(Func {
+                        params,
+                        body: expr,
+                        ret: None,
+                    })))
+                } else {
+                    Err(anyhow::anyhow!("no arrow in fn definition"))
+                }
+            }
+            t => Err(anyhow::anyhow!("cannot create func from {t:?}")),
         }
     }
 }
@@ -437,7 +490,6 @@ pub enum Type {
     Int,
     Float,
     String,
-    List,
     Bool,
     Unit,
 }
@@ -476,20 +528,6 @@ impl Literal {
             _ => None,
         }
     }
-
-    fn list_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
-        match tokens {
-            [Token::LBracket, middle @ .., Token::RBracket] => {
-                let expressions = Expression::multiple_from_tokens(middle)?;
-
-                Ok(Self {
-                    typ: Type::List,
-                    value: TypeValue::List(expressions),
-                })
-            }
-            t => Err(anyhow::anyhow!("could not create list from tokens {t:?}")),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -497,7 +535,6 @@ pub enum TypeValue {
     Int(i64),
     Float(f64),
     String(String),
-    List(Vec<Expression>),
     Bool(bool),
     Unit,
 }

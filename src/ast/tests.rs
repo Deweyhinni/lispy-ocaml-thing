@@ -3,6 +3,40 @@
 use super::*;
 
 #[test]
+fn test_fn_expr() {
+    let code = "(fn x -> (print (x)))".to_string();
+    let tokens = tokenizer::TokenList::generate(code).unwrap();
+
+    let func = Expression::from_tokens(&tokens.tokens()).unwrap();
+
+    println!("{:#?}", func);
+
+    assert_eq!(
+        func,
+        Expression {
+            local_vars: vec![],
+            expression_body: ExpressionBody::Func(Box::new(Func {
+                params: vec![Identifier::FuncParam {
+                    name: "x".into(),
+                    typ: None,
+                },],
+                body: Expression {
+                    local_vars: vec![],
+                    expression_body: ExpressionBody::FuncCall(Box::new(FuncCall {
+                        name: "print".into(),
+                        params: vec![Expression {
+                            local_vars: vec![],
+                            expression_body: ExpressionBody::VarRef(VarRef { name: "x".into() },),
+                        },],
+                    })),
+                },
+                ret: None,
+            })),
+        }
+    )
+}
+
+#[test]
 fn test_func_declaration() {
     let tokens = tokenizer::TokenList::generate(
         r#"
@@ -19,7 +53,48 @@ fn test_func_declaration() {
 
     println!("{:#?}", func);
 
-    panic!()
+    assert_eq!(
+        func,
+        Item::Declaration(Declaration::Func(Identifier::FuncDef {
+            name: "meow".into(),
+            value: Func {
+                params: vec![Identifier::FuncParam {
+                    name: "s".into(),
+                    typ: None,
+                }],
+                body: Expression {
+                    local_vars: vec![Identifier::VarDef {
+                        name: "m".into(),
+                        value: Expression {
+                            local_vars: vec![],
+                            expression_body: ExpressionBody::Literal(Box::new(Literal {
+                                typ: Type::String,
+                                value: TypeValue::String("meow".into()),
+                            })),
+                        },
+                    }],
+                    expression_body: ExpressionBody::FuncCall(Box::new(FuncCall {
+                        name: "print".into(),
+                        params: vec![
+                            Expression {
+                                local_vars: vec![],
+                                expression_body: ExpressionBody::VarRef(VarRef {
+                                    name: "m".into(),
+                                }),
+                            },
+                            Expression {
+                                local_vars: vec![],
+                                expression_body: ExpressionBody::VarRef(VarRef {
+                                    name: "s".into(),
+                                }),
+                            },
+                        ],
+                    })),
+                },
+                ret: None,
+            },
+        })),
+    )
 }
 
 #[test]
