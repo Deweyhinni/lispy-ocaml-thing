@@ -192,6 +192,24 @@ impl Expression {
                 local_vars: Vec::new(),
                 expression_body,
             })
+        } else if tokens.len() == 1 {
+            match tokens {
+                [Token::Literal(literal)] => Ok(Self {
+                    local_vars: Vec::new(),
+                    expression_body: ExpressionBody::Literal(Box::new(
+                        Literal::from_tokenizer_literal(literal),
+                    )),
+                }),
+                [Token::Identifier(ident)] => Ok(Self {
+                    local_vars: Vec::new(),
+                    expression_body: ExpressionBody::VarRef(VarRef {
+                        name: ident.clone(),
+                    }),
+                }),
+                _ => Err(anyhow::anyhow!(
+                    "cannot create expression from token {tokens:?}"
+                )),
+            }
         } else {
             return Err(anyhow::anyhow!("{tokens:#?} is not an expression"));
         }
@@ -206,7 +224,6 @@ impl Expression {
                 Token::Identifier(name),
                 Token::Operator(Operator::Eq),
                 expression @ ..,
-                // Token::RParen,
             ] => {
                 let expr = Self::from_tokens(expression)
                     .map_err(|e| e.context("unable to get expression in variable declaration"))?;
@@ -248,12 +265,18 @@ impl Expression {
         };
 
         let mut expressions = Vec::new();
-        for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
-            if i == 0 {
-                expressions.push(Expression::from_tokens(&tokens[0..=*cidx])?);
-            } else {
-                let prev_idx = body_indices[i - 1].1;
-                expressions.push(Expression::from_tokens(&tokens[(prev_idx + 1)..=*cidx])?);
+        if body_indices.is_empty() {
+            for t in tokens {
+                expressions.push(Expression::from_tokens(&vec![t.clone()][..])?);
+            }
+        } else {
+            for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
+                if i == 0 {
+                    expressions.push(Expression::from_tokens(&tokens[0..=*cidx])?);
+                } else {
+                    let prev_idx = body_indices[i - 1].1;
+                    expressions.push(Expression::from_tokens(&tokens[(prev_idx + 1)..=*cidx])?);
+                }
             }
         }
 
@@ -321,6 +344,8 @@ impl ExpressionBody {
         }
     }
 
+    /// creates a list expression body from bracket enclosed sets of tokens representing
+    /// expressions
     fn list_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
         match tokens {
             [Token::LBracket, middle @ .., Token::RBracket] => {
@@ -332,8 +357,9 @@ impl ExpressionBody {
         }
     }
 
+    /// creates a fn expression body from tokens representing an anonymous function with some
+    /// params and an expression
     fn func_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
-        println!("{tokens:?}");
         match tokens {
             [Token::Keyword(Keyword::Fn), rest @ ..] => {
                 if let Some(arrow_pos) = rest.iter().position(|t| t == &Token::Arrow) {
@@ -503,29 +529,33 @@ pub struct Literal {
 impl Literal {
     fn from_token(token: &Token) -> Option<Self> {
         match token {
-            Token::Literal(l) => match l {
-                tokenizer::Literal::String(s) => Some(Self {
-                    typ: Type::String,
-                    value: TypeValue::String(s.clone()),
-                }),
-                tokenizer::Literal::Int(i) => Some(Self {
-                    typ: Type::Int,
-                    value: TypeValue::Int(*i),
-                }),
-                tokenizer::Literal::Float(f) => Some(Self {
-                    typ: Type::Float,
-                    value: TypeValue::Float(*f),
-                }),
-                tokenizer::Literal::Bool(b) => Some(Self {
-                    typ: Type::Bool,
-                    value: TypeValue::Bool(*b),
-                }),
-                tokenizer::Literal::Unit => Some(Self {
-                    typ: Type::Unit,
-                    value: TypeValue::Unit,
-                }),
-            },
+            Token::Literal(l) => Some(Self::from_tokenizer_literal(l)),
             _ => None,
+        }
+    }
+
+    fn from_tokenizer_literal(literal: &tokenizer::Literal) -> Self {
+        match literal {
+            tokenizer::Literal::String(s) => Self {
+                typ: Type::String,
+                value: TypeValue::String(s.clone()),
+            },
+            tokenizer::Literal::Int(i) => Self {
+                typ: Type::Int,
+                value: TypeValue::Int(*i),
+            },
+            tokenizer::Literal::Float(f) => Self {
+                typ: Type::Float,
+                value: TypeValue::Float(*f),
+            },
+            tokenizer::Literal::Bool(b) => Self {
+                typ: Type::Bool,
+                value: TypeValue::Bool(*b),
+            },
+            tokenizer::Literal::Unit => Self {
+                typ: Type::Unit,
+                value: TypeValue::Unit,
+            },
         }
     }
 }
@@ -541,6 +571,7 @@ pub enum TypeValue {
 
 // utils ///////////////
 
+/// splits a list by some prefix, including that prefix
 fn split_with_prefix<T: Clone + PartialEq>(list: &[T], splitter: &T) -> Vec<Vec<T>> {
     let mut result: Vec<Vec<T>> = Vec::new();
     let mut current: Vec<T> = Vec::new();
