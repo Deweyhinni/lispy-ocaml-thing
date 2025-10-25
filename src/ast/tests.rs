@@ -4,10 +4,10 @@ use super::*;
 
 #[test]
 fn test_fn_expr() {
-    let code = "(fn x -> (print (x)))".to_string();
+    let code = "(fn x -> (print x))".to_string();
     let tokens = tokenizer::TokenList::generate(code).unwrap();
 
-    let func = Expression::from_tokens(&tokens.tokens()).unwrap();
+    let func = Expression::from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println!("{:#?}", func);
 
@@ -27,11 +27,14 @@ fn test_fn_expr() {
                         params: vec![Expression {
                             local_vars: vec![],
                             expression_body: ExpressionBody::VarRef(VarRef { name: "x".into() },),
+                            ret_type: None,
                         },],
                     })),
+                    ret_type: None,
                 },
                 ret: None,
             })),
+            ret_type: None,
         }
     )
 }
@@ -41,15 +44,15 @@ fn test_func_declaration() {
     let tokens = tokenizer::TokenList::generate(
         r#"
         let meow s =
-            let m = ("meow")
+            let m = "meow"
             in
-            (print (m) (s))
+            (print m s)
         "#
         .to_string(),
     )
     .unwrap();
 
-    let func = SyntaxTree::item_from_tokens(&tokens.tokens()).unwrap();
+    let func = SyntaxTree::item_from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println!("{:#?}", func);
 
@@ -71,6 +74,7 @@ fn test_func_declaration() {
                                 typ: Type::String,
                                 value: TypeValue::String("meow".into()),
                             })),
+                            ret_type: Some(Type::String)
                         },
                     }],
                     expression_body: ExpressionBody::FuncCall(Box::new(FuncCall {
@@ -81,15 +85,18 @@ fn test_func_declaration() {
                                 expression_body: ExpressionBody::VarRef(VarRef {
                                     name: "m".into(),
                                 }),
+                                ret_type: Some(Type::String)
                             },
                             Expression {
                                 local_vars: vec![],
                                 expression_body: ExpressionBody::VarRef(VarRef {
                                     name: "s".into(),
                                 }),
+                                ret_type: None,
                             },
                         ],
                     })),
+                    ret_type: None,
                 },
                 ret: None,
             },
@@ -100,7 +107,7 @@ fn test_func_declaration() {
 #[test]
 fn test_operator_parsing() {
     let tokens = tokenizer::TokenList::generate("+ 2 4".to_string()).unwrap();
-    let operation = Operation::from_tokens(&tokens.tokens()).unwrap();
+    let operation = Operation::from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println!("{:#?}", operation);
 
@@ -112,14 +119,16 @@ fn test_operator_parsing() {
                 expression_body: ExpressionBody::Literal(Box::new(Literal {
                     typ: Type::Int,
                     value: TypeValue::Int(2)
-                }))
+                })),
+                ret_type: Some(Type::Int)
             },
             rhs: Expression {
                 local_vars: vec![],
                 expression_body: ExpressionBody::Literal(Box::new(Literal {
                     typ: Type::Int,
                     value: TypeValue::Int(4)
-                }))
+                })),
+                ret_type: Some(Type::Int)
             }
         }
     )
@@ -127,8 +136,8 @@ fn test_operator_parsing() {
 
 #[test]
 fn test_func_call() {
-    let tokens = tokenizer::TokenList::generate("(meow (\"nya\") (14))".to_string()).unwrap();
-    let expr = Expression::from_tokens(&tokens.tokens()).unwrap();
+    let tokens = tokenizer::TokenList::generate("(meow \"nya\" 14)".to_string()).unwrap();
+    let expr = Expression::from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println!("{:#?}", expr);
 
@@ -145,6 +154,7 @@ fn test_func_call() {
                             typ: Type::String,
                             value: TypeValue::String("nya".to_string()),
                         }),),
+                        ret_type: Some(Type::String)
                     },
                     Expression {
                         local_vars: vec![],
@@ -152,17 +162,19 @@ fn test_func_call() {
                             typ: Type::Int,
                             value: TypeValue::Int(14,),
                         }),),
+                        ret_type: Some(Type::Int)
                     },
                 ],
             }),),
+            ret_type: None,
         }
     )
 }
 
 #[test]
 fn test_var_from_tokens() {
-    let tokens = crate::tokenizer::TokenList::generate("let meow = (\"meow\")".into()).unwrap();
-    let var = crate::ast::Expression::var_from_tokens(&tokens.tokens()).unwrap();
+    let tokens = crate::tokenizer::TokenList::generate("let meow = \"meow\"".into()).unwrap();
+    let var = crate::ast::Expression::var_from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println!("{:#?}", var);
 
@@ -175,7 +187,8 @@ fn test_var_from_tokens() {
                 expression_body: ExpressionBody::Literal(Box::new(Literal {
                     typ: Type::String,
                     value: TypeValue::String("meow".into())
-                }))
+                })),
+                ret_type: Some(Type::String)
             }
         }
     )
@@ -183,8 +196,8 @@ fn test_var_from_tokens() {
 
 #[test]
 fn test_literal_expression() {
-    let tokens = tokenizer::TokenList::generate("(\"meow\")".into()).unwrap();
-    let expr = Expression::from_tokens(&tokens.tokens()).unwrap();
+    let tokens = tokenizer::TokenList::generate("\"meow\"".into()).unwrap();
+    let expr = Expression::from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println!("{:#?}", expr);
 
@@ -196,6 +209,7 @@ fn test_literal_expression() {
                 typ: Type::String,
                 value: TypeValue::String("meow".into())
             })),
+            ret_type: Some(Type::String)
         }
     )
 }
@@ -203,9 +217,9 @@ fn test_literal_expression() {
 #[test]
 fn test_ident_expression() {
     let tokens =
-        tokenizer::TokenList::generate("let meow = (14) let woof = (\"bork\") in (meow)".into())
+        tokenizer::TokenList::generate("let meow = 14 let woof = \"bork\" in (meow)".into())
             .unwrap();
-    let expr = Expression::from_tokens(&tokens.tokens()).unwrap();
+    let expr = Expression::from_tokens(&tokens.tokens(), &vec![]).unwrap();
 
     println! {"{:#?}", expr};
 
@@ -220,7 +234,8 @@ fn test_ident_expression() {
                         expression_body: ExpressionBody::Literal(Box::new(Literal {
                             typ: Type::Int,
                             value: TypeValue::Int(14)
-                        }))
+                        })),
+                        ret_type: Some(Type::Int)
                     }
                 },
                 Identifier::VarDef {
@@ -230,13 +245,15 @@ fn test_ident_expression() {
                         expression_body: ExpressionBody::Literal(Box::new(Literal {
                             typ: Type::String,
                             value: TypeValue::String("bork".into())
-                        }))
+                        })),
+                        ret_type: Some(Type::String)
                     }
                 }
             ],
             expression_body: ExpressionBody::VarRef(VarRef {
                 name: "meow".into()
-            })
+            }),
+            ret_type: None,
         }
     )
 }

@@ -16,6 +16,12 @@
   (print m)
 )
 
+(let add_test = (+ 3 7))
+
+(let add_test_type = (add_test))
+
+(let float_int_add = let i = (3) let f = (0.14) in (+ i f))
+
 (let arrow_add = (fn x -> (fn y -> (+ x y))))
 
 (let () = (meow "hello"))

@@ -40,11 +40,18 @@ impl SyntaxTree {
 
         for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
             if i == 0 {
-                items.push(Self::item_from_tokens(&tokens[1..=(*cidx - 1)])?);
+                items.push(Self::item_from_tokens(&tokens[1..=(*cidx - 1)], &vec![])?);
             } else {
                 let prev_idx = body_indices[i - 1].1;
+                let idents: Vec<Identifier> = items
+                    .iter()
+                    .filter_map(|it| match it {
+                        Item::Declaration(Declaration::Func(ident)) => Some(ident.clone()),
+                    })
+                    .collect();
                 items.push(Self::item_from_tokens(
                     &tokens[(prev_idx + 2)..=(*cidx - 1)],
+                    &idents,
                 )?);
             }
         }
@@ -52,7 +59,7 @@ impl SyntaxTree {
         Ok(Self { items })
     }
 
-    fn item_from_tokens(tokens: &[Token]) -> anyhow::Result<Item> {
+    fn item_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Item> {
         match &tokens[..] {
             [
                 Token::Keyword(Keyword::Let),
@@ -60,7 +67,7 @@ impl SyntaxTree {
                 Token::Operator(Operator::Eq),
                 rest @ ..,
             ] => {
-                let expr = Expression::from_tokens(rest)
+                let expr = Expression::from_tokens(rest, idents)
                     .map_err(|e| e.context("unable to get expression when defining function"))?;
 
                 let f = Func {
@@ -101,14 +108,16 @@ impl SyntaxTree {
                         }
                     }
 
-                    let expr = Expression::from_tokens(&rest[(eq_pos + 1)..]).map_err(|e| {
-                        e.context("unable to get expression when defining function")
-                    })?;
+                    let expr =
+                        Expression::from_tokens(&rest[(eq_pos + 1)..], idents).map_err(|e| {
+                            e.context("unable to get expression when defining function")
+                        })?;
+                    let typ = expr.ret_type.clone();
 
                     let f = Func {
                         params,
                         body: expr,
-                        ret: None,
+                        ret: typ,
                     };
 
                     let fn_ident = Identifier::FuncDef {
@@ -141,13 +150,14 @@ pub enum Declaration {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Expression {
-    local_vars: Vec<Identifier>,
-    expression_body: ExpressionBody,
+    pub(crate) local_vars: Vec<Identifier>,
+    pub(crate) expression_body: ExpressionBody,
+    pub(crate) ret_type: Option<Type>,
 }
 
 impl Expression {
     /// creates an expression from tokens, either with local variables or just a basic expression
-    fn from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+    fn from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
         if let Some(Token::Keyword(Keyword::Let)) = tokens.get(0) {
             let in_pos = tokens
                 .iter()
@@ -159,7 +169,7 @@ impl Expression {
                 let vars_tokens =
                     split_with_prefix(&tokens[..in_pos], &Token::Keyword(Keyword::Let));
                 for vts in vars_tokens {
-                    let var = Self::var_from_tokens(&vts[..]).map_err(|e| {
+                    let var = Self::var_from_tokens(&vts[..], idents).map_err(|e| {
                         e.context("unable to get variable in expression definition")
                     })?;
                     vars.push(var);
@@ -168,43 +178,90 @@ impl Expression {
                 vars
             };
 
-            let expression_body = match &tokens[in_pos..] {
+            let idents = {
+                let mut idents = idents.to_vec();
+                idents.append(&mut expression_vars.clone());
+                idents
+            };
+
+            let (expression_body, typ) = match &tokens[in_pos..] {
                 [
                     Token::Keyword(Keyword::In),
                     Token::LParen,
                     body @ ..,
                     Token::RParen,
-                ] => ExpressionBody::from_tokens(body)?,
+                ] => ExpressionBody::from_tokens(body, &idents)?,
                 _ => todo!(),
             };
 
             Ok(Self {
                 local_vars: expression_vars,
                 expression_body,
+                ret_type: typ,
             })
         } else if let Some(Token::LParen) = tokens.get(0) {
-            let expression_body = match tokens {
-                [Token::LParen, body @ .., Token::RParen] => ExpressionBody::from_tokens(body)?,
+            let (expression_body, typ) = match tokens {
+                [Token::LParen, body @ .., Token::RParen] => {
+                    ExpressionBody::from_tokens(body, idents)?
+                }
                 _ => todo!(),
             };
 
             Ok(Self {
                 local_vars: Vec::new(),
                 expression_body,
+                ret_type: typ,
             })
         } else if tokens.len() == 1 {
             match tokens {
-                [Token::Literal(literal)] => Ok(Self {
-                    local_vars: Vec::new(),
-                    expression_body: ExpressionBody::Literal(Box::new(
-                        Literal::from_tokenizer_literal(literal),
-                    )),
-                }),
-                [Token::Identifier(ident)] => Ok(Self {
-                    local_vars: Vec::new(),
-                    expression_body: ExpressionBody::VarRef(VarRef {
-                        name: ident.clone(),
-                    }),
+                [Token::Literal(literal)] => {
+                    let lit = Literal::from_tokenizer_literal(literal);
+                    let typ = lit.typ.clone();
+                    Ok(Self {
+                        local_vars: Vec::new(),
+                        expression_body: ExpressionBody::Literal(Box::new(lit)),
+                        ret_type: Some(typ),
+                    })
+                }
+                [Token::Identifier(ident)] => Ok({
+                    let var_type = {
+                        if let Some(Some(typ)) = idents.iter().find_map(|id| match id {
+                            Identifier::FuncDef {
+                                name,
+                                value:
+                                    Func {
+                                        params,
+                                        body: _,
+                                        ret,
+                                    },
+                            } => {
+                                if name == ident && params.is_empty() {
+                                    Some(ret)
+                                } else {
+                                    None
+                                }
+                            }
+                            Identifier::VarDef { name, value } => {
+                                if name == ident {
+                                    Some(&value.ret_type)
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }) {
+                            Some(typ.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    Self {
+                        local_vars: Vec::new(),
+                        expression_body: ExpressionBody::VarRef(VarRef {
+                            name: ident.clone(),
+                        }),
+                        ret_type: var_type,
+                    }
                 }),
                 _ => Err(anyhow::anyhow!(
                     "cannot create expression from token {tokens:?}"
@@ -217,7 +274,7 @@ impl Expression {
 
     /// creates a variable definition from tokens representing an expression variable definition,
     /// this works on one definition at a time and can't have the 'in' token at the end
-    fn var_from_tokens(tokens: &[Token]) -> anyhow::Result<Identifier> {
+    fn var_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Identifier> {
         match tokens {
             [
                 Token::Keyword(Keyword::Let),
@@ -225,7 +282,7 @@ impl Expression {
                 Token::Operator(Operator::Eq),
                 expression @ ..,
             ] => {
-                let expr = Self::from_tokens(expression)
+                let expr = Self::from_tokens(expression, idents)
                     .map_err(|e| e.context("unable to get expression in variable declaration"))?;
                 Ok(Identifier::VarDef {
                     name: name.clone(),
@@ -240,7 +297,7 @@ impl Expression {
     /// finds and creates multiple expressions as a list for when you have multiple expressions in
     /// a row in operations or function calls.
     /// must only include valid expressions seperated by spaces
-    fn multiple_from_tokens(tokens: &[Token]) -> anyhow::Result<Vec<Self>> {
+    fn multiple_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Vec<Self>> {
         // finds the position of expression bodies
         let body_indices: Vec<(usize, usize)> = {
             let mut bodies = Vec::new();
@@ -267,15 +324,18 @@ impl Expression {
         let mut expressions = Vec::new();
         if body_indices.is_empty() {
             for t in tokens {
-                expressions.push(Expression::from_tokens(&vec![t.clone()][..])?);
+                expressions.push(Expression::from_tokens(&vec![t.clone()][..], idents)?);
             }
         } else {
             for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
                 if i == 0 {
-                    expressions.push(Expression::from_tokens(&tokens[0..=*cidx])?);
+                    expressions.push(Expression::from_tokens(&tokens[0..=*cidx], idents)?);
                 } else {
                     let prev_idx = body_indices[i - 1].1;
-                    expressions.push(Expression::from_tokens(&tokens[(prev_idx + 1)..=*cidx])?);
+                    expressions.push(Expression::from_tokens(
+                        &tokens[(prev_idx + 1)..=*cidx],
+                        idents,
+                    )?);
                 }
             }
         }
@@ -298,44 +358,104 @@ pub enum ExpressionBody {
 impl ExpressionBody {
     /// creates an expression body from tokens representing an expression body inside parenthesis
     /// but the parenthesis must not be included
-    fn from_tokens(tokens: &[Token]) -> anyhow::Result<ExpressionBody> {
-        if let Ok(expr) = Expression::from_tokens(tokens) {
-            Ok(Self::Expression(Box::new(expr)))
-        } else if tokens.len() == 1 {
+    fn from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> anyhow::Result<(ExpressionBody, Option<Type>)> {
+        if tokens.len() == 1 {
             if let Some(l) = Literal::from_token(
                 tokens
                     .get(0)
                     .expect("length checked but still unable to get token"),
             ) {
-                Ok(Self::Literal(Box::new(l)))
+                Ok((Self::Literal(Box::new(l)), None))
             } else if let Token::Identifier(name) = tokens
                 .get(0)
                 .expect("length checked but still unable to get token")
             {
-                Ok(Self::VarRef(VarRef { name: name.clone() }))
+                Ok((Self::VarRef(VarRef { name: name.clone() }), None))
             } else {
-                todo!()
+                Err(anyhow::anyhow!(
+                    "non- literal or identifier single token expression body"
+                ))
             }
+        } else if let Ok(expr) = Expression::from_tokens(tokens, idents) {
+            let typ = expr.ret_type.clone();
+            Ok((Self::Expression(Box::new(expr)), typ))
         } else if tokens.is_empty() {
-            Ok(Self::Literal(Box::new(Literal {
-                typ: Type::Unit,
-                value: TypeValue::Unit,
-            })))
-        } else if let Ok(operation) = Operation::from_tokens(tokens) {
-            Ok(Self::Operation(Box::new(operation)))
-        } else if let Ok(list) = Self::list_from_tokens(tokens) {
-            Ok(list)
-        } else if let Ok(func) = Self::func_from_tokens(tokens) {
-            Ok(func)
+            Ok((
+                Self::Literal(Box::new(Literal {
+                    typ: Type::Unit,
+                    value: TypeValue::Unit,
+                })),
+                Some(Type::Unit),
+            ))
+        } else if let Ok(operation) = Operation::from_tokens(tokens, idents) {
+            let typ = {
+                match operation {
+                    Operation::Eq { lhs: _, rhs: _ } => Some(Type::Bool),
+
+                    Operation::Add { ref lhs, ref rhs }
+                    | Operation::Sub { ref lhs, ref rhs }
+                    | Operation::Mul { ref lhs, ref rhs }
+                    | Operation::Div { ref lhs, ref rhs } => {
+                        match (lhs.ret_type.clone(), rhs.ret_type.clone()) {
+                            (Some(Type::Int), Some(Type::Int)) => Some(Type::Int),
+                            (Some(Type::Float), Some(Type::Float)) => Some(Type::Float),
+                            (Some(Type::Float), Some(Type::Int)) => Some(Type::Float),
+                            (Some(Type::Int), Some(Type::Float)) => Some(Type::Float),
+                            _ => None,
+                        }
+                    }
+                }
+            };
+
+            Ok((Self::Operation(Box::new(operation)), typ))
+        } else if let Ok(list) = Self::list_from_tokens(tokens, idents) {
+            Ok((list, None))
+        } else if let Ok(func) = Self::func_from_tokens(tokens, idents) {
+            let typ = match func {
+                Self::Func(ref f) => f.ret.clone(),
+                _ => unreachable!("matching on a expression body that should always be a func"),
+            };
+            Ok((func, typ))
         } else {
             match tokens {
                 [Token::Identifier(ident), rest @ ..] => {
-                    let param_expressions = Expression::multiple_from_tokens(rest)?;
+                    let param_expressions = Expression::multiple_from_tokens(rest, idents)?;
 
-                    Ok(Self::FuncCall(Box::new(FuncCall {
-                        name: ident.clone(),
-                        params: param_expressions,
-                    })))
+                    let func_type = {
+                        if let Some(Some(typ)) = idents.iter().find_map(|id| match id {
+                            Identifier::FuncDef {
+                                name,
+                                value:
+                                    Func {
+                                        params: _,
+                                        body: _,
+                                        ret,
+                                    },
+                            } => {
+                                if name == ident {
+                                    Some(ret)
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }) {
+                            Some(typ.clone())
+                        } else {
+                            None
+                        }
+                    };
+
+                    Ok((
+                        Self::FuncCall(Box::new(FuncCall {
+                            name: ident.clone(),
+                            params: param_expressions,
+                        })),
+                        func_type,
+                    ))
                 }
                 _ => Err(anyhow::anyhow!(
                     "cannot create expression body from {tokens:?}"
@@ -346,10 +466,10 @@ impl ExpressionBody {
 
     /// creates a list expression body from bracket enclosed sets of tokens representing
     /// expressions
-    fn list_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+    fn list_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
         match tokens {
             [Token::LBracket, middle @ .., Token::RBracket] => {
-                let expressions = Expression::multiple_from_tokens(middle)?;
+                let expressions = Expression::multiple_from_tokens(middle, idents)?;
 
                 Ok(Self::List(expressions))
             }
@@ -359,7 +479,7 @@ impl ExpressionBody {
 
     /// creates a fn expression body from tokens representing an anonymous function with some
     /// params and an expression
-    fn func_from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+    fn func_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
         match tokens {
             [Token::Keyword(Keyword::Fn), rest @ ..] => {
                 if let Some(arrow_pos) = rest.iter().position(|t| t == &Token::Arrow) {
@@ -381,12 +501,19 @@ impl ExpressionBody {
                         params
                     };
 
-                    let expr = Expression::from_tokens(&rest[(arrow_pos + 1)..])?;
+                    let idents = {
+                        let mut idents = idents.to_vec();
+                        idents.append(&mut params.clone());
+                        idents
+                    };
+
+                    let expr = Expression::from_tokens(&rest[(arrow_pos + 1)..], &idents)?;
+                    let typ = expr.ret_type.clone();
 
                     Ok(Self::Func(Box::new(Func {
                         params,
                         body: expr,
-                        ret: None,
+                        ret: typ,
                     })))
                 } else {
                     Err(anyhow::anyhow!("no arrow in fn definition"))
@@ -406,20 +533,20 @@ pub enum Identifier {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FuncCall {
-    name: String,
-    params: Vec<Expression>,
+    pub(crate) name: String,
+    pub(crate) params: Vec<Expression>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VarRef {
-    name: String,
+    pub(crate) name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Func {
-    params: Vec<Identifier>,
-    body: Expression,
-    ret: Option<Type>,
+    pub(crate) params: Vec<Identifier>,
+    pub(crate) body: Expression,
+    pub(crate) ret: Option<Type>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -432,23 +559,27 @@ pub enum Operation {
 }
 
 impl Operation {
-    fn from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+    fn from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
         match tokens {
             [Token::Operator(o), Token::Literal(lhs), Token::Literal(rhs)] => {
-                let lhs_expr = Expression {
-                    local_vars: Vec::new(),
-                    expression_body: ExpressionBody::Literal(Box::new(
-                        Literal::from_token(&Token::Literal(lhs.clone()))
-                            .expect("creating literal failed even though token is literal"),
-                    )),
+                let lhs_expr = {
+                    let lit = Literal::from_tokenizer_literal(lhs);
+                    let typ = lit.typ.clone();
+                    Expression {
+                        local_vars: Vec::new(),
+                        expression_body: ExpressionBody::Literal(Box::new(lit)),
+                        ret_type: Some(typ),
+                    }
                 };
 
-                let rhs_expr = Expression {
-                    local_vars: Vec::new(),
-                    expression_body: ExpressionBody::Literal(Box::new(
-                        Literal::from_token(&Token::Literal(rhs.clone()))
-                            .expect("creating literal failed even though token is literal"),
-                    )),
+                let rhs_expr = {
+                    let lit = Literal::from_tokenizer_literal(rhs);
+                    let typ = lit.typ.clone();
+                    Expression {
+                        local_vars: Vec::new(),
+                        expression_body: ExpressionBody::Literal(Box::new(lit)),
+                        ret_type: Some(typ),
+                    }
                 };
 
                 Ok(match o {
@@ -475,7 +606,7 @@ impl Operation {
                 })
             }
             [Token::Operator(o), rest @ ..] => {
-                let expressions = Expression::multiple_from_tokens(rest)?;
+                let expressions = Expression::multiple_from_tokens(rest, idents)?;
                 if expressions.len() == 2 {
                     Ok(match o {
                         Operator::Add => Self::Add {
@@ -522,8 +653,8 @@ pub enum Type {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Literal {
-    typ: Type,
-    value: TypeValue,
+    pub(crate) typ: Type,
+    pub(crate) value: TypeValue,
 }
 
 impl Literal {
