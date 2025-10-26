@@ -1,4 +1,4 @@
-(let meow s = (print s))
+(let meow (s : String) = (print s))
 
 (let meows = (["meow" "mrow" "mjá" "ニャー"]))
 
@@ -20,8 +20,20 @@
 
 (let add_test_type = (add_test))
 
-(let float_int_add = let i = (3) let f = (0.14) in (+ i f))
+(let float_int_add = let i = 3 let f = 0.14 in (+ i f))
 
 (let arrow_add = (fn x -> (fn y -> (+ x y))))
+
+(let list_var = let l = (["hello" "lol"]) in (l))
+
+(let param_types (x : Int) (y : Float) = (+ x y))
+
+(let list_param (l : [[String]]) = (l))
+
+(let conditional (x : Int) (y : Int) = (if (> x y) then x else y))
+
+(let conditional_2 (s1 : String) (s2 : String) = (if (== s1 s2) then "true" else "false"))
+
+(let is_even (x : Float) = (if (== (% x 2.0) (0.0)) then "even" else "odd"))
 
 (let () = (meow "hello"))
