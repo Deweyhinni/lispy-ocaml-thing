@@ -253,7 +253,7 @@ fn test_ident_expression() {
             expression_body: ExpressionBody::VarRef(VarRef {
                 name: "meow".into()
             }),
-            ret_type: None,
+            ret_type: Some(Type::Int),
         }
     )
 }

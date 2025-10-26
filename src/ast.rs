@@ -487,11 +487,7 @@ impl ExpressionBody {
                 }
             };
             Ok((list, list_type))
-        } else if let Ok(func) = Self::func_from_tokens(tokens, idents) {
-            let typ = match func {
-                Self::Func(ref f) => f.ret.clone(),
-                _ => unreachable!("matching on an expression body that should always be a func"),
-            };
+        } else if let Ok((func, typ)) = Self::func_from_tokens(tokens, idents) {
             Ok((func, typ))
         } else if let Ok(cond) = Self::conditional_from_tokens(tokens, idents) {
             let typ = match cond {
@@ -571,27 +567,14 @@ impl ExpressionBody {
 
     /// creates a fn expression body from tokens representing an anonymous function with some
     /// params and an expression
-    fn func_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
+    fn func_from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> anyhow::Result<(Self, Option<Type>)> {
         match tokens {
             [Token::Keyword(Keyword::Fn), rest @ ..] => {
                 if let Some(arrow_pos) = rest.iter().position(|t| t == &Token::Arrow) {
-                    let params = {
-                        let mut params = Vec::new();
-                        for t in &rest[..arrow_pos] {
-                            if let Token::Identifier(n) = t {
-                                params.push(Identifier::FuncParam {
-                                    name: n.to_string(),
-                                    typ: None,
-                                });
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "non-identifier in fn definition: {t:?}"
-                                ));
-                            }
-                        }
-
-                        params
-                    };
+                    let params = SyntaxTree::params_from_tokens(&rest[..arrow_pos])?;
 
                     let idents = {
                         let mut idents = idents.to_vec();
@@ -600,13 +583,43 @@ impl ExpressionBody {
                     };
 
                     let expr = Expression::from_tokens(&rest[(arrow_pos + 1)..], &idents)?;
-                    let typ = expr.ret_type.clone();
+                    let ret_typ = expr.ret_type.clone();
 
-                    Ok(Self::Func(Box::new(Func {
-                        params,
-                        body: expr,
-                        ret: typ,
-                    })))
+                    let self_typ = {
+                        if let Ok(params_types) = params
+                            .iter()
+                            .map(|i| match i {
+                                Identifier::FuncParam {
+                                    name: _,
+                                    typ: Some(t),
+                                } => Ok(Box::new(t.clone())),
+                                _ => Err(anyhow::anyhow!(
+                                    "non- function param in function param identifiers"
+                                )),
+                            })
+                            .collect::<anyhow::Result<Vec<Box<Type>>>>()
+                        {
+                            Some(Type::Func {
+                                params: params_types,
+                                ret: Box::new(
+                                    expr.ret_type
+                                        .clone()
+                                        .ok_or(anyhow::anyhow!("no return type for func"))?,
+                                ),
+                            })
+                        } else {
+                            None
+                        }
+                    };
+
+                    Ok((
+                        Self::Func(Box::new(Func {
+                            params,
+                            body: expr,
+                            ret: ret_typ,
+                        })),
+                        self_typ,
+                    ))
                 } else {
                     Err(anyhow::anyhow!("no arrow in fn definition"))
                 }
@@ -773,6 +786,10 @@ pub enum Type {
     Float,
     String,
     List(Box<Type>),
+    Func {
+        params: Vec<Box<Type>>,
+        ret: Box<Type>,
+    },
     Bool,
     Unit,
 }

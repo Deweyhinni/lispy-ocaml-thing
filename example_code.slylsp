@@ -22,7 +22,7 @@
 
 (let float_int_add = let i = 3 let f = 0.14 in (+ i f))
 
-(let arrow_add = (fn x -> (fn y -> (+ x y))))
+(let arrow_add = (fn (x : Int) -> (fn (y : Int) -> (+ x y))))
 
 (let list_var = let l = (["hello" "lol"]) in (l))
 
