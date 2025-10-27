@@ -8,7 +8,7 @@ mod tests;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SyntaxTree {
-    items: Vec<Item>,
+    pub items: Vec<Item>,
 }
 
 impl SyntaxTree {
@@ -454,6 +454,7 @@ impl ExpressionBody {
                             (Some(Type::Float), Some(Type::Float)) => Some(Type::Float),
                             (Some(Type::Float), Some(Type::Int)) => Some(Type::Float),
                             (Some(Type::Int), Some(Type::Float)) => Some(Type::Float),
+                            (Some(Type::String), Some(Type::String)) => Some(Type::String),
                             _ => None,
                         }
                     }
@@ -512,38 +513,79 @@ impl ExpressionBody {
                 [Token::Identifier(ident), rest @ ..] => {
                     let param_expressions = Expression::multiple_from_tokens(rest, idents)?;
 
-                    let func_type = {
-                        if let Some(Some(typ)) = idents.iter().find_map(|id| match id {
-                            Identifier::FuncDef {
-                                name,
-                                value:
-                                    Func {
-                                        params: _,
-                                        body: _,
-                                        ret,
-                                    },
-                            } => {
-                                if name == ident {
-                                    Some(ret)
-                                } else {
-                                    None
-                                }
+                    if let Some(func) = idents.iter().find_map(|id| match id {
+                        Identifier::FuncDef { name, value } => {
+                            if name == ident {
+                                Some(value)
+                            } else {
+                                None
                             }
-                            _ => None,
-                        }) {
-                            Some(typ.clone())
-                        } else {
-                            None
                         }
-                    };
+                        _ => None,
+                    }) {
+                        if func.params.len() != param_expressions.len() {
+                            match &func.ret {
+                                Some(Type::Func { params: _, ret: _ }) => {
+                                    println!("{:#?}", func);
+                                    // fucked up currying handling code
+                                    if param_expressions.len() > func.params.len() {
+                                        let mut typ = (func.ret.as_ref().unwrap()).clone();
+                                        let mut params_left = param_expressions.len();
+                                        loop {
+                                            match typ.clone() {
+                                                Type::Func {
+                                                    params: ref new_params,
+                                                    ret: ref new_ret,
+                                                } => {
+                                                    if new_params.len() == params_left {
+                                                        typ = *new_ret.clone();
+                                                        break;
+                                                    } else if new_params.len() < params_left {
+                                                        typ = *new_ret.clone();
+                                                        params_left -= new_params.len();
+                                                    } else {
+                                                        return Err(anyhow::anyhow!(
+                                                            "not enough params"
+                                                        ));
+                                                    }
+                                                }
+                                                _ => break,
+                                            }
+                                        }
 
-                    Ok((
-                        Self::FuncCall(Box::new(FuncCall {
-                            name: ident.clone(),
-                            params: param_expressions,
-                        })),
-                        func_type,
-                    ))
+                                        Ok((
+                                            Self::FuncCall(Box::new(FuncCall {
+                                                name: ident.clone(),
+                                                params: param_expressions,
+                                            })),
+                                            Some(typ),
+                                        ))
+                                    } else {
+                                        Err(anyhow::anyhow!("not enough function params"))
+                                    }
+                                }
+                                _ => Err(anyhow::anyhow!(
+                                    "function call params don't match function params"
+                                )),
+                            }
+                        } else {
+                            Ok((
+                                Self::FuncCall(Box::new(FuncCall {
+                                    name: ident.clone(),
+                                    params: param_expressions,
+                                })),
+                                func.ret.clone(),
+                            ))
+                        }
+                    } else {
+                        Ok((
+                            Self::FuncCall(Box::new(FuncCall {
+                                name: ident.clone(),
+                                params: param_expressions,
+                            })),
+                            None,
+                        ))
+                    }
                 }
                 _ => Err(anyhow::anyhow!(
                     "cannot create expression body from {tokens:?}"

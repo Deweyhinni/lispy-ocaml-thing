@@ -1,6 +1,6 @@
 use crate::ast::{
-    Declaration, Expression, ExpressionBody, Identifier, Operation, SyntaxTree, Type, TypeValue,
-    VarRef,
+    Declaration, Expression, ExpressionBody, Func, Identifier, Item, Operation, SyntaxTree, Type,
+    TypeValue, VarRef,
 };
 
 pub struct RustGenerator {
@@ -12,12 +12,64 @@ impl RustGenerator {
         Self { syntax }
     }
 
-    pub fn generate(&self) -> String {
-        todo!()
+    pub fn generate(&self) -> anyhow::Result<String> {
+        let prepend_stuff = String::from(r#"use std::rc::Rc;"#);
+
+        let code = self
+            .syntax
+            .items
+            .iter()
+            .map(|item| match item {
+                Item::Declaration(decl) => Self::declaration(&decl),
+            })
+            .collect::<anyhow::Result<Vec<String>>>()?
+            .join("\n");
+
+        Ok(format!("{}\n{}", prepend_stuff, code))
     }
 
-    fn declaration(decl: Declaration) -> anyhow::Result<String> {
-        todo!()
+    fn declaration(decl: &Declaration) -> anyhow::Result<String> {
+        match decl {
+            Declaration::Func(ident) => match ident {
+                Identifier::FuncDef { name, value } => Self::func(&value, &name),
+                _ => Err(anyhow::anyhow!(
+                    "non-function declaration in top level binding"
+                )),
+            },
+        }
+    }
+
+    fn func(func: &Func, name: &String) -> anyhow::Result<String> {
+        let param_strs = func
+            .params
+            .iter()
+            .map(|p| match p {
+                Identifier::FuncParam { name, typ } => Ok(format!(
+                    "{}: {}",
+                    name,
+                    Self::type_str(typ.as_ref().ok_or(anyhow::anyhow!("no type on param"))?)?
+                )),
+                _ => Err(anyhow::anyhow!("what should be a func param is not.")),
+            })
+            .collect::<anyhow::Result<Vec<String>>>()?;
+        let body_str = Self::expression(&func.body)?;
+        let ret_type_str = Self::type_str(
+            func.ret
+                .as_ref()
+                .ok_or(anyhow::anyhow!("no return type on function"))?,
+        )?;
+
+        Ok(format!(
+            "pub fn {}({}) -> {} {{ {} }}",
+            if name == &String::from("unit") {
+                &String::from("main")
+            } else {
+                name
+            },
+            param_strs.join(", "),
+            ret_type_str,
+            body_str
+        ))
     }
 
     fn expression(expr: &Expression) -> anyhow::Result<String> {
@@ -55,7 +107,7 @@ impl RustGenerator {
             ExpressionBody::Literal(l) => Ok(match &l.value {
                 TypeValue::Int(i) => i.to_string(),
                 TypeValue::Float(f) => f.to_string(),
-                TypeValue::String(s) => format!("String::from({})", s),
+                TypeValue::String(s) => format!("Rc::new(String::from(\"{}\"))", s),
                 TypeValue::Bool(b) => b.to_string(),
                 TypeValue::Unit => String::from("()"),
             }),
@@ -65,9 +117,12 @@ impl RustGenerator {
                     params.push_str(Self::expression(p)?.as_str());
                 }
 
-                Ok(format!("{}({})", fc.name, params))
+                match fc.name.as_str() {
+                    "print" => Ok(format!("println!(\"{{:?}}\", ({}))", params)),
+                    _ => Ok(format!("{}({})", fc.name, params)),
+                }
             }
-            ExpressionBody::VarRef(VarRef { name }) => Ok(format!("{{ {} }}", name)),
+            ExpressionBody::VarRef(VarRef { name }) => Ok(format!("{{ Rc::clone(&{}) }}", name)),
             ExpressionBody::Operation(op) => match op.as_ref() {
                 Operation::Eq { lhs, rhs } => {
                     let lhs_str = Self::expression(lhs)?;
@@ -112,7 +167,7 @@ impl RustGenerator {
 
                 let exprs_str = expr_strings.join(",\n");
 
-                Ok(format!("{{ vec![{}] }}", exprs_str))
+                Ok(format!("{{ Rc::new(vec![{}]) }}", exprs_str))
             }
             ExpressionBody::Func(func) => {
                 todo!()
@@ -121,14 +176,14 @@ impl RustGenerator {
         }
     }
 
-    fn type_str(typ: Type) -> anyhow::Result<String> {
+    fn type_str(typ: &Type) -> anyhow::Result<String> {
         Ok(match typ {
-            Type::Int => String::from("i64"),
-            Type::Float => String::from("f64"),
-            Type::Bool => String::from("bool"),
-            Type::String => String::from("String"),
+            Type::Int => String::from("Rc<i64>"),
+            Type::Float => String::from("Rc<f64>"),
+            Type::Bool => String::from("Rc<bool>"),
+            Type::String => String::from("Rc<String>"),
             Type::Unit => String::from("()"),
-            Type::List(t) => format!("Vec<{}>", Self::type_str(*t.clone())?),
+            Type::List(t) => format!("Rc<Vec<{}>>", Self::type_str(t)?),
             Type::Func { params, ret } => {
                 todo!()
             }

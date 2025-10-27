@@ -18,11 +18,11 @@
 
 (let add_test = (+ 3 7))
 
-(let add_test_type = (add_test))
-
 (let float_int_add = let i = 3 let f = 0.14 in (+ i f))
 
 (let arrow_add = (fn (x : Int) -> (fn (y : Int) -> (+ x y))))
+
+(let add3 = (arrow_add 3))
 
 (let list_var = let l = (["hello" "lol"]) in (l))
 
@@ -35,5 +35,17 @@
 (let conditional_2 (s1 : String) (s2 : String) = (if (== s1 s2) then "true" else "false"))
 
 (let is_even (x : Float) = (if (== (% x 2.0) (0.0)) then "even" else "odd"))
+
+(let curry_str_concat = (fn (s1 : String) -> (fn (s2 : String) -> (+ s1 s2))))
+
+(let meow_concat = (curry_str_concat "meow"))
+
+(let meow_lol = let lol = "lol" in (meow_concat lol))
+
+(let double_meow_lol = let lol = "lol" in (meow_concat (meow_concat lol)))
+
+(let double_lol_meow = let lol = "lol" in (curry_str_concat (lol) (meow_concat lol)))
+
+(let str_concat (s1 : String) (s2 : String) = (+ s1 s2))
 
 (let () = (meow "hello"))
