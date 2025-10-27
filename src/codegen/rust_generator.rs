@@ -105,10 +105,10 @@ impl RustGenerator {
     fn expression_body(expr_body: &ExpressionBody) -> anyhow::Result<String> {
         match expr_body {
             ExpressionBody::Literal(l) => Ok(match &l.value {
-                TypeValue::Int(i) => i.to_string(),
-                TypeValue::Float(f) => f.to_string(),
+                TypeValue::Int(i) => format!("Rc::new({}_i64)", i.to_string()),
+                TypeValue::Float(f) => format!("Rc::new({}_f64)", f.to_string()),
                 TypeValue::String(s) => format!("Rc::new(String::from(\"{}\"))", s),
-                TypeValue::Bool(b) => b.to_string(),
+                TypeValue::Bool(b) => format!("Rc::new({})", b.to_string()),
                 TypeValue::Unit => String::from("()"),
             }),
             ExpressionBody::FuncCall(fc) => {

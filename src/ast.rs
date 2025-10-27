@@ -467,7 +467,7 @@ impl ExpressionBody {
                 match list {
                     Self::List(ref expr_list) => {
                         if expr_list.is_empty() {
-                            Some(Type::Unit)
+                            Type::Unit
                         } else if let Some(expr) = expr_list.get(0) {
                             let typ = expr.ret_type.clone();
                             for e in expr_list {
@@ -477,7 +477,7 @@ impl ExpressionBody {
                                     ));
                                 }
                             }
-                            typ
+                            typ.unwrap_or(Type::Unit)
                         } else {
                             unreachable!("length checked")
                         }
@@ -487,7 +487,7 @@ impl ExpressionBody {
                     }
                 }
             };
-            Ok((list, list_type))
+            Ok((list, Some(Type::List(Box::new(list_type)))))
         } else if let Ok((func, typ)) = Self::func_from_tokens(tokens, idents) {
             Ok((func, typ))
         } else if let Ok(cond) = Self::conditional_from_tokens(tokens, idents) {
