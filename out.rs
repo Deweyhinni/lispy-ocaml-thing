@@ -21,6 +21,7 @@ pub fn nums() -> Rc<Vec<i64>> { { Rc::new(vec![2001_i64,
 1024_i64]) } }
 pub fn curry_str_concat() -> Box<dyn Fn(String) -> Box<dyn Fn(String) -> String>> { Box::new(move |s1: String| -> Box<dyn Fn(String) -> String> { Box::new(move |s2: String| -> String { format!("{}{}", { s1.clone() }, { s2.clone() }) }) }) }
 pub fn meow_concat() -> Box<dyn Fn(String) -> String> { { curry_str_concat()(String::from("meow")) } }
+pub fn meow_lol() -> String { { meow_concat()(String::from("lol")) } }
 pub fn always_true() -> String { {let t = true;
 { if { ({ t }) == (true) } { String::from("true") } else { String::from("false") } }} }
-pub fn main() -> () { println!("{:?}", (meow(String::from("lol")))) }
+pub fn main() -> () { println!("{:?}", (meow_lol())) }

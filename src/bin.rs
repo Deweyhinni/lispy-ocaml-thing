@@ -25,9 +25,11 @@ pub fn main() {
 
         (let meow_concat = (curry_str_concat "meow"))
 
+        (let meow_lol = (meow_concat "lol"))
+
         (let always_true = let t = true in (if (= t true) then "true" else "false"))
 
-        (let () = (print (meow "lol")))
+        (let () = (print (meow_lol)))
         "#,
     );
     let tokens = TokenList::generate(code);

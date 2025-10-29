@@ -472,51 +472,76 @@ impl ExpressionBody {
                 Ok((Self::Literal(Box::new(lit)), Some(typ)))
             }
             Token::Identifier(ident) => Ok({
-                let var_type = {
-                    if let Some(Some(typ)) = idents.iter().find_map(|id| match id {
-                        Identifier::FuncDef {
-                            name,
-                            value:
-                                Func {
-                                    params,
-                                    body: _,
-                                    ret,
-                                },
-                        } => {
-                            if name == ident && params.is_empty() {
-                                Some(ret)
-                            } else {
-                                None
-                            }
+                let refd_ident = idents.iter().find_map(|id| match id {
+                    Identifier::FuncDef {
+                        name,
+                        value:
+                            Func {
+                                params,
+                                body: _,
+                                ret: _,
+                            },
+                    } => {
+                        if name == ident && params.is_empty() {
+                            Some(id)
+                        } else {
+                            None
                         }
-                        Identifier::VarDef { name, value } => {
-                            if name == ident {
-                                Some(&value.ret_type)
-                            } else {
-                                None
-                            }
-                        }
-                        Identifier::FuncParam { name, typ } => {
-                            if name == ident {
-                                Some(typ)
-                            } else {
-                                None
-                            }
-                        }
-                    }) {
-                        Some(typ.clone())
-                    } else {
-                        None
                     }
-                };
+                    Identifier::VarDef { name, value } => {
+                        if name == ident {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    }
+                    Identifier::FuncParam { name, typ } => {
+                        if name == ident {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    }
+                });
 
-                (
-                    Self::VarRef(VarRef {
-                        name: ident.clone(),
-                        typ: var_type.clone(),
-                    }),
-                    var_type,
-                )
+                match refd_ident {
+                    Some(Identifier::FuncDef {
+                        name,
+                        value:
+                            Func {
+                                params: _,
+                                body: _,
+                                ret,
+                            },
+                    }) => (
+                        Self::FuncCall(Box::new(FuncCall::IdentCall {
+                            name: name.clone(),
+                            params: Vec::new(),
+                        })),
+                        ret.clone(),
+                    ),
+                    Some(Identifier::VarDef { name, value }) => (
+                        Self::VarRef(VarRef {
+                            name: name.clone(),
+                            typ: value.ret_type.clone(),
+                        }),
+                        value.ret_type.clone(),
+                    ),
+                    Some(Identifier::FuncParam { name, typ }) => (
+                        Self::VarRef(VarRef {
+                            name: name.clone(),
+                            typ: typ.clone(),
+                        }),
+                        typ.clone(),
+                    ),
+                    None => (
+                        Self::VarRef(VarRef {
+                            name: ident.clone(),
+                            typ: None,
+                        }),
+                        None,
+                    ),
+                }
             }),
             _ => Err(ParseError::ParseFailed(format!(
                 "non- literal or identifier single token expression body: {:?}",
@@ -547,11 +572,11 @@ impl ExpressionBody {
                         if func.params.len() < param_expressions.len() {
                             match func {
                                 Func {
-                                    params,
+                                    params: _,
                                     body:
                                         Expression {
-                                            local_vars,
-                                            expression_body: ExpressionBody::Func(f),
+                                            local_vars: _,
+                                            expression_body,
                                             ret_type:
                                                 Some(Type::Func {
                                                     params: _,
@@ -582,8 +607,8 @@ impl ExpressionBody {
                                     Ok((Self::FuncCall(Box::new(fc)), Some(*fc_ret.clone())))
                                 }
                                 _ => Err(ParseError::ParseFailed(format!(
-                                    "func return type is not fn in: {:?}",
-                                    tokens
+                                    "func return type is not fn in: {:?} ; {:?}",
+                                    tokens, func,
                                 ))),
                             }
                         } else {
