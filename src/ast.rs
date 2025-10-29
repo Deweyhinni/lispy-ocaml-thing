@@ -1,6 +1,6 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::{cmp::PartialEq, iter};
+use std::{cmp::PartialEq, error::Error, fmt::Display, iter};
 
 use crate::tokenizer::{self, Keyword, Operator, Token, TokenList};
 
@@ -67,8 +67,7 @@ impl SyntaxTree {
                 Token::Operator(Operator::Eq),
                 rest @ ..,
             ] => {
-                let expr = Expression::from_tokens(rest, idents)
-                    .map_err(|e| e.context("unable to get expression when defining function"))?;
+                let expr = Expression::from_tokens(rest, idents)?;
 
                 let f = Func {
                     params: Vec::new(),
@@ -102,10 +101,7 @@ impl SyntaxTree {
                         idents
                     };
 
-                    let expr =
-                        Expression::from_tokens(&rest[(eq_pos + 1)..], &idents).map_err(|e| {
-                            e.context("unable to get expression when defining function")
-                        })?;
+                    let expr = Expression::from_tokens(&rest[(eq_pos + 1)..], &idents)?;
                     let typ = expr.ret_type.clone();
 
                     let f = Func {
@@ -131,7 +127,7 @@ impl SyntaxTree {
         }
     }
 
-    fn params_from_tokens(tokens: &[Token]) -> anyhow::Result<Vec<Identifier>> {
+    fn params_from_tokens(tokens: &[Token]) -> Result<Vec<Identifier>, ParseError> {
         let param_indices: Vec<(usize, usize)> = {
             let mut params = Vec::new();
             let mut parens = Vec::new();
@@ -142,7 +138,10 @@ impl SyntaxTree {
                     if parens.len() == 1 {
                         params.push((parens.pop().expect("length checked but unable to pop"), i));
                     } else if parens.is_empty() {
-                        return Err(anyhow::anyhow!("parenthesis are not balanced"));
+                        return Err(ParseError::ParseFailed(format!(
+                            "parenthesis are not balanced in: {:?}",
+                            tokens
+                        )));
                     } else {
                         parens
                             .pop()
@@ -163,10 +162,10 @@ impl SyntaxTree {
                         typ: None,
                     });
                 } else {
-                    return Err(anyhow::anyhow!(
+                    return Err(ParseError::ParseFailed(format!(
                         "unexpected token {:?} in function param definition",
                         t
-                    ));
+                    )));
                 }
             }
 
@@ -182,9 +181,10 @@ impl SyntaxTree {
                         });
                     }
                     _ => {
-                        return Err(anyhow::anyhow!(
-                            "unrecognized token structure for function param",
-                        ));
+                        return Err(ParseError::ParseFailed(format!(
+                            "unrecognized token structure for function param in: {:?}",
+                            tokens
+                        )));
                     }
                 }
             }
@@ -213,21 +213,22 @@ pub struct Expression {
 
 impl Expression {
     /// creates an expression from tokens, either with local variables or just a basic expression
-    fn from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
+    fn from_tokens(tokens: &[Token], idents: &[Identifier]) -> Result<Self, ParseError> {
         if let Some(Token::Keyword(Keyword::Let)) = tokens.get(0) {
             let in_pos = tokens
                 .iter()
                 .position(|t| t == &Token::Keyword(Keyword::In))
-                .ok_or(anyhow::anyhow!("no 'in' token after let declaration"))?;
+                .ok_or(ParseError::ParseFailed(format!(
+                    "no 'in' token after let declaration in: {:?}",
+                    tokens
+                )))?;
 
             let expression_vars = {
                 let mut vars: Vec<Identifier> = Vec::new();
                 let vars_tokens =
                     split_with_prefix(&tokens[..in_pos], &Token::Keyword(Keyword::Let));
                 for vts in vars_tokens {
-                    let var = Self::var_from_tokens(&vts[..], idents).map_err(|e| {
-                        e.context("unable to get variable in expression definition")
-                    })?;
+                    let var = Self::var_from_tokens(&vts[..], idents)?;
                     vars.push(var);
                 }
 
@@ -276,13 +277,16 @@ impl Expression {
                 ret_type: typ,
             })
         } else {
-            return Err(anyhow::anyhow!("{tokens:#?} is not an expression"));
+            return Err(ParseError::ParseFailed(format!(
+                "{:?} is not an expression",
+                tokens
+            )));
         }
     }
 
     /// creates a variable definition from tokens representing an expression variable definition,
     /// this works on one definition at a time and can't have the 'in' token at the end
-    fn var_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Identifier> {
+    fn var_from_tokens(tokens: &[Token], idents: &[Identifier]) -> Result<Identifier, ParseError> {
         match tokens {
             [
                 Token::Keyword(Keyword::Let),
@@ -290,22 +294,24 @@ impl Expression {
                 Token::Operator(Operator::Eq),
                 expression @ ..,
             ] => {
-                let expr = Self::from_tokens(expression, idents)
-                    .map_err(|e| e.context("unable to get expression in variable declaration"))?;
+                let expr = Self::from_tokens(expression, idents)?;
                 Ok(Identifier::VarDef {
                     name: name.clone(),
                     value: expr,
                 })
             }
 
-            _ => Err(anyhow::anyhow!("{tokens:#?} is not a variable declaration")),
+            _ => Err(ParseError::NotMatched),
         }
     }
 
     /// finds and creates multiple expressions as a list for when you have multiple expressions in
     /// a row in operations or function calls.
     /// must only include valid expressions seperated by spaces
-    fn multiple_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Vec<Self>> {
+    fn multiple_from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> Result<Vec<Self>, ParseError> {
         // finds the position of expression bodies
         let body_indices: Vec<(usize, usize)> = {
             let mut bodies = Vec::new();
@@ -317,7 +323,10 @@ impl Expression {
                     if parens.len() == 1 {
                         bodies.push((parens.pop().expect("length checked but unable to pop"), i));
                     } else if parens.is_empty() {
-                        return Err(anyhow::anyhow!("parenthesis are not balanced"));
+                        return Err(ParseError::ParseFailed(format!(
+                            "parenthesis are not balanced in: {:?}",
+                            tokens
+                        )));
                     } else {
                         parens
                             .pop()
@@ -370,7 +379,7 @@ impl ExpressionBody {
     fn from_tokens(
         tokens: &[Token],
         idents: &[Identifier],
-    ) -> anyhow::Result<(ExpressionBody, Option<Type>)> {
+    ) -> Result<(ExpressionBody, Option<Type>), ParseError> {
         if tokens.len() == 1 {
             match tokens {
                 [Token::Literal(literal)] => {
@@ -425,10 +434,10 @@ impl ExpressionBody {
                         var_type,
                     )
                 }),
-                _ => Err(anyhow::anyhow!(
+                _ => Err(ParseError::ParseFailed(format!(
                     "non- literal or identifier single token expression body: {:?}",
                     tokens
-                )),
+                ))),
             }
         } else if let Ok(expr) = Expression::from_tokens(tokens, idents) {
             let typ = expr.ret_type.clone();
@@ -473,9 +482,10 @@ impl ExpressionBody {
                             let typ = expr.ret_type.clone();
                             for e in expr_list {
                                 if e.ret_type != typ {
-                                    return Err(anyhow::anyhow!(
-                                        "list has multiple expression types"
-                                    ));
+                                    return Err(ParseError::ParseFailed(format!(
+                                        "list has multiple expression types in: {:?}",
+                                        tokens
+                                    )));
                                 }
                             }
                             typ.unwrap_or(Type::Unit)
@@ -499,9 +509,10 @@ impl ExpressionBody {
                     if then_type == else_type {
                         then_type
                     } else {
-                        return Err(anyhow::anyhow!(
-                            "then and else expression return types do not match"
-                        ));
+                        return Err(ParseError::ParseFailed(format!(
+                            "then and else expression return types do not match in: {:?}",
+                            tokens
+                        )));
                     }
                 }
                 _ => unreachable!(
@@ -513,9 +524,10 @@ impl ExpressionBody {
             Ok((fc, typ))
         } else {
             match tokens {
-                _ => Err(anyhow::anyhow!(
-                    "cannot create expression body from {tokens:?}"
-                )),
+                _ => Err(ParseError::ParseFailed(format!(
+                    "cannot create expression body from {:?}",
+                    tokens
+                ))),
             }
         }
     }
@@ -523,7 +535,7 @@ impl ExpressionBody {
     fn func_call_from_tokens(
         tokens: &[Token],
         idents: &[Identifier],
-    ) -> anyhow::Result<(Self, Option<Type>)> {
+    ) -> Result<(Self, Option<Type>), ParseError> {
         match tokens {
             [Token::Identifier(ident), rest @ ..] => {
                 let param_expressions = Expression::multiple_from_tokens(rest, idents)?;
@@ -576,10 +588,16 @@ impl ExpressionBody {
 
                                     Ok((Self::FuncCall(Box::new(fc)), Some(*fc_ret.clone())))
                                 }
-                                _ => Err(anyhow::anyhow!("func return type is not fn")),
+                                _ => Err(ParseError::ParseFailed(format!(
+                                    "func return type is not fn in: {:?}",
+                                    tokens
+                                ))),
                             }
                         } else {
-                            Err(anyhow::anyhow!("function params don't match function"))
+                            Err(ParseError::ParseFailed(format!(
+                                "function params don't match function in: {:?}",
+                                tokens
+                            )))
                         }
                     } else {
                         Ok((
@@ -600,20 +618,20 @@ impl ExpressionBody {
                     ))
                 }
             }
-            _ => Err(anyhow::anyhow!("cannot create function from tokens")),
+            _ => Err(ParseError::NotMatched),
         }
     }
 
     /// creates a list expression body from bracket enclosed sets of tokens representing
     /// expressions
-    fn list_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
+    fn list_from_tokens(tokens: &[Token], idents: &[Identifier]) -> Result<Self, ParseError> {
         match tokens {
             [Token::LBracket, middle @ .., Token::RBracket] => {
                 let expressions = Expression::multiple_from_tokens(middle, idents)?;
 
                 Ok(Self::List(expressions))
             }
-            t => Err(anyhow::anyhow!("could not create list from tokens {t:?}")),
+            _ => Err(ParseError::NotMatched),
         }
     }
 
@@ -622,7 +640,7 @@ impl ExpressionBody {
     fn func_from_tokens(
         tokens: &[Token],
         idents: &[Identifier],
-    ) -> anyhow::Result<(Self, Option<Type>)> {
+    ) -> Result<(Self, Option<Type>), ParseError> {
         match tokens {
             [Token::Keyword(Keyword::Fn), rest @ ..] => {
                 if let Some(arrow_pos) = rest.iter().position(|t| t == &Token::Arrow) {
@@ -653,11 +671,12 @@ impl ExpressionBody {
                         {
                             Some(Type::Func {
                                 params: params_types,
-                                ret: Box::new(
-                                    expr.ret_type
-                                        .clone()
-                                        .ok_or(anyhow::anyhow!("no return type for func"))?,
-                                ),
+                                ret: Box::new(expr.ret_type.clone().ok_or(
+                                    ParseError::ParseFailed(format!(
+                                        "no return type for func: {:?}",
+                                        tokens
+                                    )),
+                                )?),
                             })
                         } else {
                             None
@@ -673,24 +692,33 @@ impl ExpressionBody {
                         self_typ,
                     ))
                 } else {
-                    Err(anyhow::anyhow!("no arrow in fn definition"))
+                    Err(ParseError::ParseFailed(format!(
+                        "no arrow in fn definition: {:?}",
+                        tokens
+                    )))
                 }
             }
-            t => Err(anyhow::anyhow!("cannot create func from {t:?}")),
+            t => Err(ParseError::NotMatched),
         }
     }
 
-    fn conditional_from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
+    fn conditional_from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> Result<Self, ParseError> {
         match tokens {
             [Token::Keyword(Keyword::If), rest @ ..] => {
                 let then_pos = rest
                     .iter()
                     .position(|t| t == &Token::Keyword(Keyword::Then))
-                    .ok_or(anyhow::anyhow!("no then keyword"))?;
+                    .ok_or(ParseError::ParseFailed(format!(
+                        "no then keyword in: {:?}",
+                        tokens
+                    )))?;
                 let else_pos = rest
                     .iter()
                     .position(|t| t == &Token::Keyword(Keyword::Else))
-                    .ok_or(anyhow::anyhow!("no else keyword"))?;
+                    .ok_or(ParseError::ParseFailed(format!("no else keyword")))?;
 
                 let if_expr = Expression::from_tokens(&rest[..then_pos], idents)?;
                 let then_expr = Expression::from_tokens(&rest[(then_pos + 1)..else_pos], idents)?;
@@ -702,7 +730,7 @@ impl ExpressionBody {
                     els: else_expr,
                 })))
             }
-            _ => Err(anyhow::anyhow!("not a conditional")),
+            _ => Err(ParseError::NotMatched),
         }
     }
 }
@@ -854,7 +882,7 @@ pub enum Type {
 }
 
 impl Type {
-    fn from_tokens(tokens: &[Token]) -> anyhow::Result<Self> {
+    fn from_tokens(tokens: &[Token]) -> Result<Self, ParseError> {
         match tokens {
             [Token::Identifier(name)] => match name.as_str() {
                 "Int" => Ok(Self::Int),
@@ -862,12 +890,12 @@ impl Type {
                 "Bool" => Ok(Self::Bool),
                 "String" => Ok(Self::String),
                 "Unit" => Ok(Self::Unit),
-                _ => Err(anyhow::anyhow!("unknown type name: {}", name)),
+                _ => Err(ParseError::NotMatched),
             },
             [Token::LBracket, middle @ .., Token::RBracket] => {
                 Ok(Self::List(Box::new(Self::from_tokens(middle)?)))
             }
-            _ => Err(anyhow::anyhow!("unknown type representation: {:?}", tokens)),
+            _ => Err(ParseError::NotMatched),
         }
     }
 }
@@ -920,6 +948,22 @@ pub enum TypeValue {
     Bool(bool),
     Unit,
 }
+
+// errors //////////
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParseError {
+    NotMatched,
+    ParseFailed(String),
+}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for ParseError {}
 
 // utils ///////////////
 
