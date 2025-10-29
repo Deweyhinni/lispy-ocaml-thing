@@ -643,7 +643,10 @@ impl ExpressionBody {
                     }
                 };
 
-                Ok((Self::List(expressions), Some(list_type)))
+                Ok((
+                    Self::List(expressions),
+                    Some(Type::List(Box::new(list_type))),
+                ))
             }
             _ => Err(ParseError::NotMatched),
         }
