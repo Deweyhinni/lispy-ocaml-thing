@@ -440,7 +440,12 @@ impl ExpressionBody {
         let operation = Operation::from_tokens(tokens, idents)?;
         let typ = {
             match operation {
-                Operation::Eq { lhs: _, rhs: _ } => Some(Type::Bool),
+                Operation::Eq { lhs: _, rhs: _ }
+                | Operation::Bigger { lhs: _, rhs: _ }
+                | Operation::Smaller { lhs: _, rhs: _ }
+                | Operation::BiggerEq { lhs: _, rhs: _ }
+                | Operation::SmallerEq { lhs: _, rhs: _ } => Some(Type::Bool),
+                Operation::Not { expr: _ } => Some(Type::Bool),
 
                 Operation::Add { ref lhs, ref rhs }
                 | Operation::Sub { ref lhs, ref rhs }
@@ -837,6 +842,11 @@ pub enum Operation {
     Mul { lhs: Expression, rhs: Expression },
     Div { lhs: Expression, rhs: Expression },
     Eq { lhs: Expression, rhs: Expression },
+    Not { expr: Expression },
+    Bigger { lhs: Expression, rhs: Expression },
+    Smaller { lhs: Expression, rhs: Expression },
+    BiggerEq { lhs: Expression, rhs: Expression },
+    SmallerEq { lhs: Expression, rhs: Expression },
 }
 
 impl Operation {
@@ -863,54 +873,104 @@ impl Operation {
                     }
                 };
 
-                Ok(match o {
-                    Operator::Add => Self::Add {
+                match o {
+                    Operator::Add => Ok(Self::Add {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
-                    },
-                    Operator::Sub => Self::Sub {
+                    }),
+                    Operator::Sub => Ok(Self::Sub {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
-                    },
-                    Operator::Mul => Self::Mul {
+                    }),
+                    Operator::Mul => Ok(Self::Mul {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
-                    },
-                    Operator::Div => Self::Div {
+                    }),
+                    Operator::Div => Ok(Self::Div {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
-                    },
-                    Operator::Eq => Self::Eq {
+                    }),
+                    Operator::Eq => Ok(Self::Eq {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
-                    },
-                })
+                    }),
+                    Operator::Bigger => Ok(Self::Bigger {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    }),
+                    Operator::Smaller => Ok(Self::Smaller {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    }),
+                    Operator::BiggerEq => Ok(Self::BiggerEq {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    }),
+                    Operator::SmallerEq => Ok(Self::SmallerEq {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    }),
+                    Operator::Not => Err(ParseError::ParseFailed(format!(
+                        "too many expression for not operator in: {:?}",
+                        tokens
+                    ))),
+                }
             }
             [Token::Operator(o), rest @ ..] => {
                 let expressions = Expression::multiple_from_tokens(rest, idents)?;
                 if expressions.len() == 2 {
-                    Ok(match o {
-                        Operator::Add => Self::Add {
+                    match o {
+                        Operator::Add => Ok(Self::Add {
                             lhs: expressions[0].clone(),
                             rhs: expressions[1].clone(),
-                        },
-                        Operator::Sub => Self::Sub {
+                        }),
+                        Operator::Sub => Ok(Self::Sub {
                             lhs: expressions[0].clone(),
                             rhs: expressions[1].clone(),
-                        },
-                        Operator::Mul => Self::Mul {
+                        }),
+                        Operator::Mul => Ok(Self::Mul {
                             lhs: expressions[0].clone(),
                             rhs: expressions[1].clone(),
-                        },
-                        Operator::Div => Self::Div {
+                        }),
+                        Operator::Div => Ok(Self::Div {
                             lhs: expressions[0].clone(),
                             rhs: expressions[1].clone(),
-                        },
-                        Operator::Eq => Self::Eq {
+                        }),
+                        Operator::Eq => Ok(Self::Eq {
                             lhs: expressions[0].clone(),
                             rhs: expressions[1].clone(),
-                        },
-                    })
+                        }),
+                        Operator::Bigger => Ok(Self::Bigger {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        }),
+                        Operator::Smaller => Ok(Self::Smaller {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        }),
+                        Operator::BiggerEq => Ok(Self::BiggerEq {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        }),
+                        Operator::SmallerEq => Ok(Self::SmallerEq {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        }),
+                        Operator::Not => Err(ParseError::ParseFailed(format!(
+                            "too many tokens for not operator in: {:?}",
+                            tokens
+                        ))),
+                    }
+                } else if expressions.len() == 1 {
+                    match o {
+                        Operator::Not => Ok(Self::Not {
+                            expr: expressions[0].clone(),
+                        }),
+                        _ => Err(ParseError::ParseFailed(format!(
+                            "too few expressions for operator in: {:?}",
+                            tokens
+                        ))),
+                    }
                 } else {
                     Err(ParseError::ParseFailed(format!(
                         "number of expressions does not match operator in: {:?}",

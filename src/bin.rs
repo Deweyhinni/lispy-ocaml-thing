@@ -29,6 +29,10 @@ pub fn main() {
 
         (let always_true = let t = true in (if (= t true) then "true" else "false"))
 
+        (let bigger (x : Int) (y : Int) = (if (> x y) then x else y))
+
+        (let equals (x : Int) (y : Int) = (if (= x y) then "equal" else "not"))
+
         (let () = (print (meow_lol)))
         "#,
     );

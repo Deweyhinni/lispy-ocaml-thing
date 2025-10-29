@@ -76,7 +76,7 @@ impl RustGenerator {
         let ret_type_str = Self::type_str(
             func.ret
                 .as_ref()
-                .ok_or(anyhow::anyhow!("no return type on function"))?,
+                .ok_or(anyhow::anyhow!("no return type on function: {:#?}", func))?,
         )?;
 
         Ok(format!(
@@ -191,6 +191,30 @@ impl RustGenerator {
                     let lhs_str = Self::expression(lhs)?;
                     let rhs_str = Self::expression(rhs)?;
                     Ok(format!("{{ ({}) == ({}) }}", lhs_str, rhs_str))
+                }
+                Operation::Bigger { lhs, rhs } => {
+                    let lhs_str = Self::expression(lhs)?;
+                    let rhs_str = Self::expression(rhs)?;
+                    Ok(format!("{{ ({}) > ({}) }}", lhs_str, rhs_str))
+                }
+                Operation::Smaller { lhs, rhs } => {
+                    let lhs_str = Self::expression(lhs)?;
+                    let rhs_str = Self::expression(rhs)?;
+                    Ok(format!("{{ ({}) < ({}) }}", lhs_str, rhs_str))
+                }
+                Operation::BiggerEq { lhs, rhs } => {
+                    let lhs_str = Self::expression(lhs)?;
+                    let rhs_str = Self::expression(rhs)?;
+                    Ok(format!("{{ ({}) >= ({}) }}", lhs_str, rhs_str))
+                }
+                Operation::SmallerEq { lhs, rhs } => {
+                    let lhs_str = Self::expression(lhs)?;
+                    let rhs_str = Self::expression(rhs)?;
+                    Ok(format!("{{ ({}) <= ({}) }}", lhs_str, rhs_str))
+                }
+                Operation::Not { expr } => {
+                    let expr_str = Self::expression(expr)?;
+                    Ok(format!("{{ !({}) }}", expr_str))
                 }
                 Operation::Add { lhs, rhs } => {
                     let lhs_str = Self::expression(lhs)?;

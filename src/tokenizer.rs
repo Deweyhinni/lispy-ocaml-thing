@@ -1,3 +1,5 @@
+use std::usize;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8,10 +10,15 @@ pub struct TokenList {
 impl TokenList {
     pub fn generate(code: String) -> anyhow::Result<Self> {
         let mut tokens: Vec<Token> = Vec::new();
-        let words: Vec<&str> = code.split_whitespace().collect();
+        let mut words: Vec<String> = code
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         for w in words.iter() {
-            let chars: Vec<char> = w.chars().collect();
-            tokens.append(&mut Self::tokens_in_word(&chars[..]));
+            let word_chars: Vec<char> = w.chars().collect();
+            tokens.append(&mut Self::tokens_in_word(&word_chars[..]));
         }
 
         Ok(Self { tokens })
@@ -119,7 +126,13 @@ pub enum Operator {
     Sub, // -
     Mul, // *
     Div, // /
-    Eq,  // =
+
+    Eq,        // =
+    Not,       // !
+    Bigger,    // >
+    Smaller,   // <
+    BiggerEq,  // >=
+    SmallerEq, // <=
 }
 
 impl Operator {
@@ -132,6 +145,11 @@ impl Operator {
             "*" => Self::Mul,
             "/" => Self::Div,
             "=" => Self::Eq,
+            "!" => Self::Not,
+            ">" => Self::Bigger,
+            "<" => Self::Smaller,
+            ">=" => Self::BiggerEq,
+            "<=" => Self::SmallerEq,
             _ => return None,
         })
     }
