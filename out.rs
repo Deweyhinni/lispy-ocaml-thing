@@ -2,15 +2,15 @@
 use std::rc::Rc;
 pub fn print(s: String) -> () { () }
 pub fn meow(m: String) -> String { { m.clone() } }
-pub fn meows() -> Rc<Vec<String>> { { Rc::new(vec![String::from("meow"),
+pub fn meows() -> String { { Rc::new(vec![String::from("meow"),
 String::from("mrow"),
 String::from("mjá"),
 String::from("ニャー")]) } }
-pub fn floats() -> Rc<Vec<f64>> { { Rc::new(vec![3.14_f64,
+pub fn floats() -> f64 { { Rc::new(vec![3.14_f64,
 2.72_f64,
 6.9_f64,
 3.141592653589_f64]) } }
-pub fn nums() -> Rc<Vec<i64>> { { Rc::new(vec![2001_i64,
+pub fn nums() -> i64 { { Rc::new(vec![2001_i64,
 1984_i64,
 2000_i64,
 1_i64,

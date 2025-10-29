@@ -381,154 +381,147 @@ impl ExpressionBody {
         idents: &[Identifier],
     ) -> Result<(ExpressionBody, Option<Type>), ParseError> {
         if tokens.len() == 1 {
-            match tokens {
-                [Token::Literal(literal)] => {
-                    let lit = Literal::from_tokenizer_literal(literal);
-                    let typ = lit.typ.clone();
-                    Ok((Self::Literal(Box::new(lit)), Some(typ)))
-                }
-                [Token::Identifier(ident)] => Ok({
-                    let var_type = {
-                        if let Some(Some(typ)) = idents.iter().find_map(|id| match id {
-                            Identifier::FuncDef {
-                                name,
-                                value:
-                                    Func {
-                                        params,
-                                        body: _,
-                                        ret,
-                                    },
-                            } => {
-                                if name == ident && params.is_empty() {
-                                    Some(ret)
-                                } else {
-                                    None
-                                }
-                            }
-                            Identifier::VarDef { name, value } => {
-                                if name == ident {
-                                    Some(&value.ret_type)
-                                } else {
-                                    None
-                                }
-                            }
-                            Identifier::FuncParam { name, typ } => {
-                                if name == ident {
-                                    Some(typ)
-                                } else {
-                                    None
-                                }
-                            }
-                        }) {
-                            Some(typ.clone())
-                        } else {
-                            None
-                        }
-                    };
-
-                    (
-                        Self::VarRef(VarRef {
-                            name: ident.clone(),
-                            typ: var_type.clone(),
-                        }),
-                        var_type,
-                    )
-                }),
-                _ => Err(ParseError::ParseFailed(format!(
-                    "non- literal or identifier single token expression body: {:?}",
-                    tokens
-                ))),
-            }
+            return Self::from_single_token(&tokens[0], idents);
         } else if let Ok(expr) = Expression::from_tokens(tokens, idents) {
             let typ = expr.ret_type.clone();
-            Ok((Self::Expression(Box::new(expr)), typ))
+            return Ok((Self::Expression(Box::new(expr)), typ));
         } else if tokens.is_empty() {
-            Ok((
+            return Ok((
                 Self::Literal(Box::new(Literal {
                     typ: Type::Unit,
                     value: TypeValue::Unit,
                 })),
                 Some(Type::Unit),
-            ))
-        } else if let Ok(operation) = Operation::from_tokens(tokens, idents) {
-            let typ = {
-                match operation {
-                    Operation::Eq { lhs: _, rhs: _ } => Some(Type::Bool),
+            ));
+        }
 
-                    Operation::Add { ref lhs, ref rhs }
-                    | Operation::Sub { ref lhs, ref rhs }
-                    | Operation::Mul { ref lhs, ref rhs }
-                    | Operation::Div { ref lhs, ref rhs } => {
-                        match (lhs.ret_type.clone(), rhs.ret_type.clone()) {
-                            (Some(Type::Int), Some(Type::Int)) => Some(Type::Int),
-                            (Some(Type::Float), Some(Type::Float)) => Some(Type::Float),
-                            (Some(Type::Float), Some(Type::Int)) => Some(Type::Float),
-                            (Some(Type::Int), Some(Type::Float)) => Some(Type::Float),
-                            (Some(Type::String), Some(Type::String)) => Some(Type::String),
-                            _ => None,
-                        }
-                    }
-                }
-            };
+        match Self::operation_from_tokens(tokens, idents) {
+            Ok(r) => return Ok(r),
+            Err(ParseError::NotMatched) => (),
+            Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
+        }
 
-            Ok((Self::Operation(Box::new(operation)), typ))
-        } else if let Ok(list) = Self::list_from_tokens(tokens, idents) {
-            let list_type = {
-                match list {
-                    Self::List(ref expr_list) => {
-                        if expr_list.is_empty() {
-                            Type::Unit
-                        } else if let Some(expr) = expr_list.get(0) {
-                            let typ = expr.ret_type.clone();
-                            for e in expr_list {
-                                if e.ret_type != typ {
-                                    return Err(ParseError::ParseFailed(format!(
-                                        "list has multiple expression types in: {:?}",
-                                        tokens
-                                    )));
-                                }
-                            }
-                            typ.unwrap_or(Type::Unit)
-                        } else {
-                            unreachable!("length checked")
-                        }
-                    }
-                    _ => {
-                        unreachable!("matching on an expression body that should always be a list")
+        match Self::list_from_tokens(tokens, idents) {
+            Ok(r) => return Ok(r),
+            Err(ParseError::NotMatched) => (),
+            Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
+        }
+
+        match Self::func_from_tokens(tokens, idents) {
+            Ok(r) => return Ok(r),
+            Err(ParseError::NotMatched) => (),
+            Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
+        }
+
+        match Self::conditional_from_tokens(tokens, idents) {
+            Ok(r) => return Ok(r),
+            Err(ParseError::NotMatched) => (),
+            Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
+        }
+
+        match Self::func_call_from_tokens(tokens, idents) {
+            Ok(r) => return Ok(r),
+            Err(ParseError::NotMatched) => (),
+            Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
+        }
+
+        match tokens {
+            _ => Err(ParseError::ParseFailed(format!(
+                "cannot create expression body from {:?}",
+                tokens
+            ))),
+        }
+    }
+
+    fn operation_from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> Result<(Self, Option<Type>), ParseError> {
+        let operation = Operation::from_tokens(tokens, idents)?;
+        let typ = {
+            match operation {
+                Operation::Eq { lhs: _, rhs: _ } => Some(Type::Bool),
+
+                Operation::Add { ref lhs, ref rhs }
+                | Operation::Sub { ref lhs, ref rhs }
+                | Operation::Mul { ref lhs, ref rhs }
+                | Operation::Div { ref lhs, ref rhs } => {
+                    match (lhs.ret_type.clone(), rhs.ret_type.clone()) {
+                        (Some(Type::Int), Some(Type::Int)) => Some(Type::Int),
+                        (Some(Type::Float), Some(Type::Float)) => Some(Type::Float),
+                        (Some(Type::Float), Some(Type::Int)) => Some(Type::Float),
+                        (Some(Type::Int), Some(Type::Float)) => Some(Type::Float),
+                        (Some(Type::String), Some(Type::String)) => Some(Type::String),
+                        _ => None,
                     }
                 }
-            };
-            Ok((list, Some(Type::List(Box::new(list_type)))))
-        } else if let Ok((func, typ)) = Self::func_from_tokens(tokens, idents) {
-            Ok((func, typ))
-        } else if let Ok(cond) = Self::conditional_from_tokens(tokens, idents) {
-            let typ = match cond {
-                Self::Conditional(ref c) => {
-                    let then_type = c.then.ret_type.clone();
-                    let else_type = c.els.ret_type.clone();
-                    if then_type == else_type {
-                        then_type
-                    } else {
-                        return Err(ParseError::ParseFailed(format!(
-                            "then and else expression return types do not match in: {:?}",
-                            tokens
-                        )));
-                    }
-                }
-                _ => unreachable!(
-                    "matching on an expression body that should always be a conditional"
-                ),
-            };
-            Ok((cond, typ))
-        } else if let Ok((fc, typ)) = Self::func_call_from_tokens(tokens, idents) {
-            Ok((fc, typ))
-        } else {
-            match tokens {
-                _ => Err(ParseError::ParseFailed(format!(
-                    "cannot create expression body from {:?}",
-                    tokens
-                ))),
             }
+        };
+
+        Ok((Self::Operation(Box::new(operation)), typ))
+    }
+
+    fn from_single_token(
+        token: &Token,
+        idents: &[Identifier],
+    ) -> Result<(Self, Option<Type>), ParseError> {
+        match token {
+            Token::Literal(literal) => {
+                let lit = Literal::from_tokenizer_literal(literal);
+                let typ = lit.typ.clone();
+                Ok((Self::Literal(Box::new(lit)), Some(typ)))
+            }
+            Token::Identifier(ident) => Ok({
+                let var_type = {
+                    if let Some(Some(typ)) = idents.iter().find_map(|id| match id {
+                        Identifier::FuncDef {
+                            name,
+                            value:
+                                Func {
+                                    params,
+                                    body: _,
+                                    ret,
+                                },
+                        } => {
+                            if name == ident && params.is_empty() {
+                                Some(ret)
+                            } else {
+                                None
+                            }
+                        }
+                        Identifier::VarDef { name, value } => {
+                            if name == ident {
+                                Some(&value.ret_type)
+                            } else {
+                                None
+                            }
+                        }
+                        Identifier::FuncParam { name, typ } => {
+                            if name == ident {
+                                Some(typ)
+                            } else {
+                                None
+                            }
+                        }
+                    }) {
+                        Some(typ.clone())
+                    } else {
+                        None
+                    }
+                };
+
+                (
+                    Self::VarRef(VarRef {
+                        name: ident.clone(),
+                        typ: var_type.clone(),
+                    }),
+                    var_type,
+                )
+            }),
+            _ => Err(ParseError::ParseFailed(format!(
+                "non- literal or identifier single token expression body: {:?}",
+                token
+            ))),
         }
     }
 
@@ -624,12 +617,33 @@ impl ExpressionBody {
 
     /// creates a list expression body from bracket enclosed sets of tokens representing
     /// expressions
-    fn list_from_tokens(tokens: &[Token], idents: &[Identifier]) -> Result<Self, ParseError> {
+    fn list_from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> Result<(Self, Option<Type>), ParseError> {
         match tokens {
             [Token::LBracket, middle @ .., Token::RBracket] => {
                 let expressions = Expression::multiple_from_tokens(middle, idents)?;
+                let list_type = {
+                    if expressions.is_empty() {
+                        Type::Unit
+                    } else if let Some(expr) = expressions.get(0) {
+                        let typ = expr.ret_type.clone();
+                        for e in &expressions {
+                            if e.ret_type != typ {
+                                return Err(ParseError::ParseFailed(format!(
+                                    "list has multiple expression types in: {:?}",
+                                    tokens
+                                )));
+                            }
+                        }
+                        typ.unwrap_or(Type::Unit)
+                    } else {
+                        unreachable!("length checked")
+                    }
+                };
 
-                Ok(Self::List(expressions))
+                Ok((Self::List(expressions), Some(list_type)))
             }
             _ => Err(ParseError::NotMatched),
         }
@@ -705,7 +719,7 @@ impl ExpressionBody {
     fn conditional_from_tokens(
         tokens: &[Token],
         idents: &[Identifier],
-    ) -> Result<Self, ParseError> {
+    ) -> Result<(Self, Option<Type>), ParseError> {
         match tokens {
             [Token::Keyword(Keyword::If), rest @ ..] => {
                 let then_pos = rest
@@ -724,11 +738,25 @@ impl ExpressionBody {
                 let then_expr = Expression::from_tokens(&rest[(then_pos + 1)..else_pos], idents)?;
                 let else_expr = Expression::from_tokens(&rest[(else_pos + 1)..], idents)?;
 
-                Ok(Self::Conditional(Box::new(Conditional {
-                    cond: if_expr,
-                    then: then_expr,
-                    els: else_expr,
-                })))
+                let then_type = then_expr.ret_type.clone();
+                let else_type = else_expr.ret_type.clone();
+                let typ = if then_type == else_type {
+                    then_type
+                } else {
+                    return Err(ParseError::ParseFailed(format!(
+                        "then and else expression return types do not match in: {:?}",
+                        tokens
+                    )));
+                };
+
+                Ok((
+                    Self::Conditional(Box::new(Conditional {
+                        cond: if_expr,
+                        then: then_expr,
+                        els: else_expr,
+                    })),
+                    typ,
+                ))
             }
             _ => Err(ParseError::NotMatched),
         }
@@ -784,7 +812,7 @@ pub enum Operation {
 }
 
 impl Operation {
-    fn from_tokens(tokens: &[Token], idents: &[Identifier]) -> anyhow::Result<Self> {
+    fn from_tokens(tokens: &[Token], idents: &[Identifier]) -> Result<Self, ParseError> {
         match tokens {
             [Token::Operator(o), Token::Literal(lhs), Token::Literal(rhs)] => {
                 let lhs_expr = {
@@ -856,13 +884,14 @@ impl Operation {
                         },
                     })
                 } else {
-                    Err(anyhow::anyhow!(
-                        "number of expressions does not match operator"
-                    ))
+                    Err(ParseError::ParseFailed(format!(
+                        "number of expressions does not match operator in: {:?}",
+                        tokens
+                    )))
                 }
             }
 
-            _ => Err(anyhow::anyhow!("no operator at the start of expression")),
+            _ => Err(ParseError::NotMatched),
         }
     }
 }
