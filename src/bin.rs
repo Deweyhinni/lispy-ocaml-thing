@@ -21,7 +21,13 @@ pub fn main() {
 
         (let nums = ([2001 1984 2000 1 0 -1 -154 3 1024]))
 
-        (let () = (print (meow "meow")))
+        (let curry_str_concat = (fn (s1 : String) -> (fn (s2 : String) -> (+ s1 s2))))
+
+        (let meow_concat = (curry_str_concat "meow"))
+
+        (let always_true = let t = true in (if (= t true) then "true" else "false"))
+
+        (let () = (print (meow "lol")))
         "#,
     );
     let tokens = TokenList::generate(code);

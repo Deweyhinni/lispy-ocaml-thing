@@ -420,6 +420,7 @@ impl ExpressionBody {
                     (
                         Self::VarRef(VarRef {
                             name: ident.clone(),
+                            typ: var_type.clone(),
                         }),
                         var_type,
                     )
@@ -508,89 +509,98 @@ impl ExpressionBody {
                 ),
             };
             Ok((cond, typ))
+        } else if let Ok((fc, typ)) = Self::func_call_from_tokens(tokens, idents) {
+            Ok((fc, typ))
         } else {
             match tokens {
-                [Token::Identifier(ident), rest @ ..] => {
-                    let param_expressions = Expression::multiple_from_tokens(rest, idents)?;
-
-                    if let Some(func) = idents.iter().find_map(|id| match id {
-                        Identifier::FuncDef { name, value } => {
-                            if name == ident {
-                                Some(value)
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    }) {
-                        if func.params.len() != param_expressions.len() {
-                            match &func.ret {
-                                Some(Type::Func { params: _, ret: _ }) => {
-                                    println!("{:#?}", func);
-                                    // fucked up currying handling code
-                                    if param_expressions.len() > func.params.len() {
-                                        let mut typ = (func.ret.as_ref().unwrap()).clone();
-                                        let mut params_left = param_expressions.len();
-                                        loop {
-                                            match typ.clone() {
-                                                Type::Func {
-                                                    params: ref new_params,
-                                                    ret: ref new_ret,
-                                                } => {
-                                                    if new_params.len() == params_left {
-                                                        typ = *new_ret.clone();
-                                                        break;
-                                                    } else if new_params.len() < params_left {
-                                                        typ = *new_ret.clone();
-                                                        params_left -= new_params.len();
-                                                    } else {
-                                                        return Err(anyhow::anyhow!(
-                                                            "not enough params"
-                                                        ));
-                                                    }
-                                                }
-                                                _ => break,
-                                            }
-                                        }
-
-                                        Ok((
-                                            Self::FuncCall(Box::new(FuncCall {
-                                                name: ident.clone(),
-                                                params: param_expressions,
-                                            })),
-                                            Some(typ),
-                                        ))
-                                    } else {
-                                        Err(anyhow::anyhow!("not enough function params"))
-                                    }
-                                }
-                                _ => Err(anyhow::anyhow!(
-                                    "function call params don't match function params"
-                                )),
-                            }
-                        } else {
-                            Ok((
-                                Self::FuncCall(Box::new(FuncCall {
-                                    name: ident.clone(),
-                                    params: param_expressions,
-                                })),
-                                func.ret.clone(),
-                            ))
-                        }
-                    } else {
-                        Ok((
-                            Self::FuncCall(Box::new(FuncCall {
-                                name: ident.clone(),
-                                params: param_expressions,
-                            })),
-                            None,
-                        ))
-                    }
-                }
                 _ => Err(anyhow::anyhow!(
                     "cannot create expression body from {tokens:?}"
                 )),
             }
+        }
+    }
+
+    fn func_call_from_tokens(
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> anyhow::Result<(Self, Option<Type>)> {
+        match tokens {
+            [Token::Identifier(ident), rest @ ..] => {
+                let param_expressions = Expression::multiple_from_tokens(rest, idents)?;
+
+                if let Some(func) = idents.iter().find_map(|id| match id {
+                    Identifier::FuncDef { name, value } => {
+                        if name == ident {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }) {
+                    if func.params.len() != param_expressions.len() {
+                        if func.params.len() < param_expressions.len() {
+                            match func {
+                                Func {
+                                    params,
+                                    body:
+                                        Expression {
+                                            local_vars,
+                                            expression_body: ExpressionBody::Func(f),
+                                            ret_type:
+                                                Some(Type::Func {
+                                                    params: _,
+                                                    ret: fc_ret,
+                                                }),
+                                        },
+                                    ret,
+                                } => {
+                                    let outer_func_params =
+                                        param_expressions[0..(func.params.len())].to_vec();
+                                    let inner_func_params =
+                                        param_expressions[(func.params.len())..].to_vec();
+
+                                    let fc = FuncCall::AnonCall {
+                                        params: inner_func_params,
+                                        func: Expression {
+                                            local_vars: Vec::new(),
+                                            expression_body: ExpressionBody::FuncCall(Box::new(
+                                                FuncCall::IdentCall {
+                                                    name: ident.clone(),
+                                                    params: outer_func_params,
+                                                },
+                                            )),
+                                            ret_type: ret.clone(),
+                                        },
+                                    };
+
+                                    Ok((Self::FuncCall(Box::new(fc)), Some(*fc_ret.clone())))
+                                }
+                                _ => Err(anyhow::anyhow!("func return type is not fn")),
+                            }
+                        } else {
+                            Err(anyhow::anyhow!("function params don't match function"))
+                        }
+                    } else {
+                        Ok((
+                            Self::FuncCall(Box::new(FuncCall::IdentCall {
+                                name: ident.clone(),
+                                params: param_expressions,
+                            })),
+                            func.ret.clone(),
+                        ))
+                    }
+                } else {
+                    Ok((
+                        Self::FuncCall(Box::new(FuncCall::IdentCall {
+                            name: ident.clone(),
+                            params: param_expressions,
+                        })),
+                        None,
+                    ))
+                }
+            }
+            _ => Err(anyhow::anyhow!("cannot create function from tokens")),
         }
     }
 
@@ -705,14 +715,21 @@ pub enum Identifier {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct FuncCall {
-    pub(crate) name: String,
-    pub(crate) params: Vec<Expression>,
+pub enum FuncCall {
+    IdentCall {
+        name: String,
+        params: Vec<Expression>,
+    },
+    AnonCall {
+        params: Vec<Expression>,
+        func: Expression,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct VarRef {
     pub(crate) name: String,
+    pub(crate) typ: Option<Type>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
