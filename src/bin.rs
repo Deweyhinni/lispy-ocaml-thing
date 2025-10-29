@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use std::{
     fs::{self, File},
     io::Read,
@@ -31,7 +32,7 @@ pub fn main() {
 
         (let bigger (x : Int) (y : Int) = (if (> x y) then x else y))
 
-        (let equals (x : Int) (y : Int) = (if (= x y) then "equal" else "not"))
+        (let equals (x : Int) (y : Int) = (if (= x y) then "equal" else "does not equal"))
 
         (let () = (print (meow_lol)))
         "#,

@@ -25,5 +25,5 @@ pub fn meow_lol() -> String { { meow_concat()(String::from("lol")) } }
 pub fn always_true() -> String { {let t = true;
 { if { ({ t }) == (true) } { String::from("true") } else { String::from("false") } }} }
 pub fn bigger(x: i64, y: i64) -> i64 { { if { ({ x }) > ({ y }) } { { x } } else { { y } } } }
-pub fn equals(x: i64, y: i64) -> String { { if { ({ x }) == ({ y }) } { String::from("equal") } else { String::from("not") } } }
+pub fn equals(x: i64, y: i64) -> String { { if { ({ x }) == ({ y }) } { String::from("equal") } else { String::from("does not equal") } } }
 pub fn main() -> () { println!("{:?}", (meow_lol())) }

@@ -10,12 +10,27 @@ pub struct TokenList {
 impl TokenList {
     pub fn generate(code: String) -> anyhow::Result<Self> {
         let mut tokens: Vec<Token> = Vec::new();
-        let mut words: Vec<String> = code
-            .split_whitespace()
-            .collect::<Vec<&str>>()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let words = {
+            let mut current_word = String::new();
+            let mut words = Vec::new();
+            let mut in_string = false;
+            for c in code.chars() {
+                if c == '"' {
+                    in_string = !in_string;
+                    current_word.push('"');
+                } else if c.is_whitespace() && !in_string {
+                    words.push(current_word.clone());
+                    current_word.clear();
+                } else {
+                    current_word.push(c);
+                }
+            }
+
+            words = words.iter().filter(|s| s.len() > 0).cloned().collect();
+
+            words
+        };
+
         for w in words.iter() {
             let word_chars: Vec<char> = w.chars().collect();
             tokens.append(&mut Self::tokens_in_word(&word_chars[..]));
