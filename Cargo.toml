@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "silly_list_lib"
+name = "silly_lisp_lib"
 path = "src/lib.rs"
 
 [[bin]]
-name = "silly_list_bin"
+name = "silly_lisp_bin"
 path = "src/bin.rs"
 
 [dependencies]

@@ -4,7 +4,7 @@ use std::{
     io::Read,
 };
 
-use silly_list_lib::{
+use silly_lisp_lib::{
     ast::SyntaxTree, codegen::rust_generator::RustGenerator, tokenizer::TokenList,
 };
 
@@ -34,7 +34,23 @@ pub fn main() {
 
         (let equals (x : Int) (y : Int) = (if (= x y) then "equal" else "does not equal"))
 
-        (let () = (print (meow_lol)))
+        (let kitty = (fn (s : String) -> (+ (+ "kitty says: " s) "!")))
+
+        (let factorial (n : Int) = 
+          (if (= n 0) 
+            then 1 
+            else (* n (factorial (- n 1)))))
+
+        (
+        let func_var = 
+            let add_1 = (fn (x : Int) -> (+ x 1))
+            in (add_1 2)
+        )
+
+        (let max_of_three (a : Int) (b : Int) (c : Int) = 
+          (if (> a b) then (if (> a c) then a else c) else (if (> b c) then b else c)))
+
+        (let () = (print (+ "15 factorial is: " (factorial 15))))
         "#,
     );
     let tokens = TokenList::generate(code);

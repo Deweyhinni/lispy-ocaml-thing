@@ -261,7 +261,12 @@ impl Expression {
                 [Token::LParen, body @ .., Token::RParen] => {
                     ExpressionBody::from_tokens(body, idents)?
                 }
-                _ => todo!(),
+                _ => {
+                    return Err(ParseError::ParseFailed(format!(
+                        "unable to create expression from {:?}",
+                        tokens
+                    )));
+                }
             };
 
             Ok(Self {
@@ -313,51 +318,110 @@ impl Expression {
         idents: &[Identifier],
     ) -> Result<Vec<Self>, ParseError> {
         // finds the position of expression bodies
-        let body_indices: Vec<(usize, usize)> = {
-            let mut bodies = Vec::new();
-            let mut parens = Vec::new();
+        let expressions = {
+            let mut expressions = Vec::new();
+            let mut current_expr = Vec::new();
+            let mut parens = 0;
             for (i, t) in tokens.iter().enumerate() {
-                if t == &Token::LParen {
-                    parens.push(i);
-                } else if t == &Token::RParen {
-                    if parens.len() == 1 {
-                        bodies.push((parens.pop().expect("length checked but unable to pop"), i));
-                    } else if parens.is_empty() {
-                        return Err(ParseError::ParseFailed(format!(
-                            "parenthesis are not balanced in: {:?}",
-                            tokens
-                        )));
-                    } else {
-                        parens
-                            .pop()
-                            .expect("pop returned None even though length checked");
+                match t {
+                    Token::LParen => {
+                        parens += 1;
+                        current_expr.push(Token::LParen);
+                    }
+                    Token::RParen => {
+                        if parens == 1 {
+                            current_expr.push(Token::RParen);
+                            parens -= 1;
+                            let new_expr = match Expression::from_tokens(&current_expr, idents) {
+                                Ok(e) => e,
+                                Err(err) => return Err(err),
+                            };
+                            expressions.push(new_expr);
+                            current_expr.clear();
+                        } else if parens == 0 {
+                            return Err(ParseError::ParseFailed(format!(
+                                "parenthesis are not balanced in: {:?}",
+                                tokens
+                            )));
+                        } else {
+                            parens -= 1;
+                            current_expr.push(Token::RParen);
+                        }
+                    }
+                    t => {
+                        if parens == 0 {
+                            match Expression::from_tokens(&[t.clone()], idents) {
+                                Ok(e) => expressions.push(e),
+                                Err(err) => return Err(err),
+                            }
+                        } else {
+                            current_expr.push(t.clone());
+                        }
                     }
                 }
             }
 
-            bodies
+            expressions
         };
 
-        let mut expressions = Vec::new();
-        if body_indices.is_empty() {
-            for t in tokens {
-                expressions.push(Expression::from_tokens(&vec![t.clone()][..], idents)?);
+        Ok(expressions)
+    }
+
+    fn expression_until_stop_token(
+        stop: &Token,
+        tokens: &[Token],
+        idents: &[Identifier],
+    ) -> Result<(Expression, usize), ParseError> {
+        match tokens {
+            [Token::LParen, ..] | [Token::Keyword(Keyword::Let), ..] => {
+                let mut parens = 0;
+                let mut expr_tokens = Vec::new();
+                let mut stop_pos = 0;
+
+                for (i, t) in tokens.iter().enumerate() {
+                    println!("token: {:?}", t);
+                    println!("expr: {:?}", expr_tokens);
+                    match t {
+                        Token::LParen => {
+                            parens += 1;
+                            expr_tokens.push(t.clone());
+                        }
+                        Token::RParen => {
+                            parens -= 1;
+                            expr_tokens.push(t.clone());
+                        }
+                        t => {
+                            if t == stop && parens == 0 {
+                                stop_pos = i;
+                                break;
+                            } else {
+                                expr_tokens.push(t.clone());
+                            }
+                        }
+                    }
+                }
+
+                println!("idk: {:?}", expr_tokens);
+
+                Ok((Expression::from_tokens(&expr_tokens[..], idents)?, stop_pos))
             }
-        } else {
-            for (i, (_oidx, cidx)) in body_indices.iter().enumerate() {
-                if i == 0 {
-                    expressions.push(Expression::from_tokens(&tokens[0..=*cidx], idents)?);
+            [t, b, ..] => {
+                if b == stop {
+                    Ok((Expression::from_tokens(&[t.clone()], idents)?, 1usize))
                 } else {
-                    let prev_idx = body_indices[i - 1].1;
-                    expressions.push(Expression::from_tokens(
-                        &tokens[(prev_idx + 1)..=*cidx],
-                        idents,
-                    )?);
+                    return Err(ParseError::ParseFailed(format!(
+                        "second token is not the stop token in: {:?}",
+                        tokens
+                    )));
                 }
             }
+            _ => {
+                return Err(ParseError::ParseFailed(format!(
+                    "unexpected start token for expression in: {:?}",
+                    tokens,
+                )));
+            }
         }
-
-        Ok(expressions)
     }
 }
 
@@ -425,12 +489,10 @@ impl ExpressionBody {
             Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
         }
 
-        match tokens {
-            _ => Err(ParseError::ParseFailed(format!(
-                "cannot create expression body from {:?}",
-                tokens
-            ))),
-        }
+        Err(ParseError::ParseFailed(format!(
+            "cannot create expression body from {:?}",
+            tokens
+        )))
     }
 
     fn operation_from_tokens(
@@ -567,6 +629,21 @@ impl ExpressionBody {
                     Identifier::FuncDef { name, value } => {
                         if name == ident {
                             Some(value)
+                        } else {
+                            None
+                        }
+                    }
+                    Identifier::VarDef {
+                        name,
+                        value:
+                            Expression {
+                                local_vars,
+                                expression_body: ExpressionBody::Func(f),
+                                ret_type,
+                            },
+                    } => {
+                        if name == ident {
+                            Some(f)
                         } else {
                             None
                         }
@@ -755,25 +832,33 @@ impl ExpressionBody {
     ) -> Result<(Self, Option<Type>), ParseError> {
         match tokens {
             [Token::Keyword(Keyword::If), rest @ ..] => {
-                let then_pos = rest
-                    .iter()
-                    .position(|t| t == &Token::Keyword(Keyword::Then))
-                    .ok_or(ParseError::ParseFailed(format!(
-                        "no then keyword in: {:?}",
-                        tokens
-                    )))?;
-                let else_pos = rest
-                    .iter()
-                    .position(|t| t == &Token::Keyword(Keyword::Else))
-                    .ok_or(ParseError::ParseFailed(format!("no else keyword")))?;
+                let (if_expr, then_pos) = Expression::expression_until_stop_token(
+                    &Token::Keyword(Keyword::Then),
+                    rest,
+                    idents,
+                )?;
+                println!("if_expr: {:?}", if_expr);
+                let (then_expr, else_pos) = Expression::expression_until_stop_token(
+                    &Token::Keyword(Keyword::Else),
+                    &rest[(then_pos + 1)..],
+                    idents,
+                )?;
+                println!("then_expr: {:?}", then_expr);
 
-                let if_expr = Expression::from_tokens(&rest[..then_pos], idents)?;
-                let then_expr = Expression::from_tokens(&rest[(then_pos + 1)..else_pos], idents)?;
-                let else_expr = Expression::from_tokens(&rest[(else_pos + 1)..], idents)?;
+                println!("then_pos: {:?}, else_pos: {:?}", then_pos, else_pos);
+
+                let else_expr =
+                    Expression::from_tokens(&rest[(then_pos + else_pos + 2)..], idents)?;
+
+                println!("else_expr: {:?}", else_expr);
 
                 let then_type = then_expr.ret_type.clone();
                 let else_type = else_expr.ret_type.clone();
                 let typ = if then_type == else_type {
+                    then_type
+                } else if then_type == None && else_type != None {
+                    else_type
+                } else if else_type == None && then_type != None {
                     then_type
                 } else {
                     return Err(ParseError::ParseFailed(format!(

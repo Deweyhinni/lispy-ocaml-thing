@@ -26,4 +26,9 @@ pub fn always_true() -> String { {let t = true;
 { if { ({ t }) == (true) } { String::from("true") } else { String::from("false") } }} }
 pub fn bigger(x: i64, y: i64) -> i64 { { if { ({ x }) > ({ y }) } { { x } } else { { y } } } }
 pub fn equals(x: i64, y: i64) -> String { { if { ({ x }) == ({ y }) } { String::from("equal") } else { String::from("does not equal") } } }
-pub fn main() -> () { println!("{:?}", (meow_lol())) }
+pub fn kitty() -> Box<dyn Fn(String) -> String> { Box::new(move |s: String| -> String { format!("{}{}", format!("{}{}", String::from("kitty says: "), { s.clone() }), String::from("!")) }) }
+pub fn factorial(n: i64) -> i64 { { if { ({ n }) == (0_i64) } { 1_i64 } else { { ({ n }) * (factorial({ ({ n }) - (1_i64) })) } } } }
+pub fn func_var() -> i64 { {let add_1 = Box::new(move |x: i64| -> i64 { { ({ x }) + (1_i64) } });
+add_1(2_i64)} }
+pub fn max_of_three(a: i64, b: i64, c: i64) -> i64 { { if { ({ a }) > ({ b }) } { { if { ({ a }) > ({ c }) } { { a } } else { { c } } } } else { { if { ({ b }) > ({ c }) } { { b } } else { { c } } } } } }
+pub fn main() -> () { println!("{:?}", (format!("{}{}", String::from("15 factorial is: "), factorial(15_i64)))) }

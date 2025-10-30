@@ -223,23 +223,29 @@ impl RustGenerator {
                         (Some(Type::String), Some(Type::String)) => {
                             Ok(format!("format!(\"{{}}{{}}\", {}, {})", lhs_str, rhs_str))
                         }
-                        _ => Ok(format!("{{ {} + {} }}", lhs_str, rhs_str)),
+                        (Some(Type::String), Some(other)) => {
+                            Ok(format!("format!(\"{{}}{{}}\", {}, {})", lhs_str, rhs_str))
+                        }
+                        (Some(other), Some(Type::String)) => {
+                            Ok(format!("format!(\"{{}}{{}}\", {}, {})", lhs_str, rhs_str))
+                        }
+                        _ => Ok(format!("{{ ({}) + ({}) }}", lhs_str, rhs_str)),
                     }
                 }
                 Operation::Sub { lhs, rhs } => {
                     let lhs_str = Self::expression(lhs)?;
                     let rhs_str = Self::expression(rhs)?;
-                    Ok(format!("{{ {} - {} }}", lhs_str, rhs_str))
+                    Ok(format!("{{ ({}) - ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Mul { lhs, rhs } => {
                     let lhs_str = Self::expression(lhs)?;
                     let rhs_str = Self::expression(rhs)?;
-                    Ok(format!("{{ {} * {} }}", lhs_str, rhs_str))
+                    Ok(format!("{{ ({}) * ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Div { lhs, rhs } => {
                     let lhs_str = Self::expression(lhs)?;
                     let rhs_str = Self::expression(rhs)?;
-                    Ok(format!("{{ {} / {} }}", lhs_str, rhs_str))
+                    Ok(format!("{{ ({}) / ({}) }}", lhs_str, rhs_str))
                 }
             },
             ExpressionBody::Conditional(cd) => {
