@@ -435,6 +435,7 @@ pub enum ExpressionBody {
     List(Vec<Expression>),
     Func(Box<Func>),
     Conditional(Box<Conditional>),
+    Extern(Type),
 }
 
 impl ExpressionBody {
@@ -489,10 +490,30 @@ impl ExpressionBody {
             Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
         }
 
+        match Self::extern_from_tokens(tokens, idents) {
+            Ok((body, typ)) => return Ok((body, Some(typ))),
+            Err(ParseError::NotMatched) => (),
+            Err(ParseError::ParseFailed(why)) => return Err(ParseError::ParseFailed(why)),
+        }
+
         Err(ParseError::ParseFailed(format!(
             "cannot create expression body from {:?}",
             tokens
         )))
+    }
+
+    fn extern_from_tokens(
+        tokens: &[Token],
+        _idents: &[Identifier],
+    ) -> Result<(Self, Type), ParseError> {
+        match tokens {
+            [Token::Keyword(Keyword::Extern)] => Ok((Self::Extern(Type::Unit), Type::Unit)),
+            [Token::Keyword(Keyword::Extern), rest @ ..] => {
+                let typ = Type::from_tokens(rest)?;
+                Ok((Self::Extern(typ.clone()), typ))
+            }
+            _ => Err(ParseError::NotMatched),
+        }
     }
 
     fn operation_from_tokens(
@@ -519,6 +540,13 @@ impl ExpressionBody {
                         (Some(Type::Float), Some(Type::Int)) => Some(Type::Float),
                         (Some(Type::Int), Some(Type::Float)) => Some(Type::Float),
                         (Some(Type::String), Some(Type::String)) => Some(Type::String),
+                        (Some(Type::List(lhs_list_typ)), Some(Type::List(rhs_list_type))) => {
+                            if lhs_list_typ == rhs_list_type {
+                                Some(Type::List(rhs_list_type))
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     }
                 }

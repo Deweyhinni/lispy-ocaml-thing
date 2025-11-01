@@ -14,6 +14,10 @@ pub fn main() {
     // file.read_to_string(&mut code).unwrap();
     let code = String::from(
         r#"
+        (let print s = (extern Unit))
+        (let int_of_float (f : Float) = (extern Int))
+        (let float_of_int (i : Int) = (extern Float))
+
         (let meow (m : String) = (m))
 
         (let meows = (["meow" "mrow" "mjá" "ニャー"]))
@@ -49,6 +53,29 @@ pub fn main() {
 
         (let max_of_three (a : Int) (b : Int) (c : Int) = 
           (if (> a b) then (if (> a c) then a else c) else (if (> b c) then b else c)))
+
+        (let var_ref_list = 
+            let a = 10 
+            let b = 15 
+            let c = 20 
+            in ([a b c a b c])
+        )
+
+        (let string_list =
+            let a = "hello"
+            let b = "there"
+            let c = "lol"
+            in ([a b c])
+        )
+
+        (let list_list = 
+            let a = ([1 2 3])
+            let b = ([4 5 6])
+            let c = ([7 8 9])
+            in ([a b c])
+        )
+
+        (let convert_test = let a = 31.4 in (int_of_float a))
 
         (let () = (print (+ "15 factorial is: " (factorial 15))))
         "#,

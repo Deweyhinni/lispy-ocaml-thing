@@ -1,6 +1,8 @@
 #![allow(unused_braces)]
 use std::rc::Rc;
-pub fn print(s: String) -> () { () }
+
+pub fn int_of_float(f: f64) -> i64 {f as i64}
+pub fn float_of_int(i: i64) -> f64 {i as f64}
 pub fn meow(m: String) -> String { { m.clone() } }
 pub fn meows() -> Rc<Vec<String>> { { Rc::new(vec![String::from("meow"),
 String::from("mrow"),
@@ -31,4 +33,33 @@ pub fn factorial(n: i64) -> i64 { { if { ({ n }) == (0_i64) } { 1_i64 } else { {
 pub fn func_var() -> i64 { {let add_1 = Box::new(move |x: i64| -> i64 { { ({ x }) + (1_i64) } });
 add_1(2_i64)} }
 pub fn max_of_three(a: i64, b: i64, c: i64) -> i64 { { if { ({ a }) > ({ b }) } { { if { ({ a }) > ({ c }) } { { a } } else { { c } } } } else { { if { ({ b }) > ({ c }) } { { b } } else { { c } } } } } }
-pub fn main() -> () { println!("{:?}", (format!("{}{}", String::from("15 factorial is: "), factorial(15_i64)))) }
+pub fn var_ref_list() -> Rc<Vec<i64>> { {let a = 10_i64;
+let b = 15_i64;
+let c = 20_i64;
+{ Rc::new(vec![{ a },
+{ b },
+{ c },
+{ a },
+{ b },
+{ c }]) }} }
+pub fn string_list() -> Rc<Vec<String>> { {let a = String::from("hello");
+let b = String::from("there");
+let c = String::from("lol");
+{ Rc::new(vec![{ a.clone() },
+{ b.clone() },
+{ c.clone() }]) }} }
+pub fn list_list() -> Rc<Vec<Rc<Vec<i64>>>> { {let a = { Rc::new(vec![1_i64,
+2_i64,
+3_i64]) };
+let b = { Rc::new(vec![4_i64,
+5_i64,
+6_i64]) };
+let c = { Rc::new(vec![7_i64,
+8_i64,
+9_i64]) };
+{ Rc::new(vec![{ Rc::clone(&a) },
+{ Rc::clone(&b) },
+{ Rc::clone(&c) }]) }} }
+pub fn convert_test() -> i64 { {let a = 31.4_f64;
+int_of_float({ a })} }
+pub fn main() -> () { println!("{:?}", format!("{}{}", String::from("15 factorial is: "), factorial(15_i64))) }

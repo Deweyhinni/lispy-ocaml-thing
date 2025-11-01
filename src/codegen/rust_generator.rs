@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::ast::{
     Declaration, Expression, ExpressionBody, Func, FuncCall, Identifier, Item, Literal, Operation,
     SyntaxTree, Type, TypeValue, VarRef,
@@ -5,31 +7,44 @@ use crate::ast::{
 
 pub struct RustGenerator {
     syntax: SyntaxTree,
+    externs: HashMap<String, ExternFunc>,
 }
 
 impl RustGenerator {
     pub fn new(syntax: SyntaxTree) -> Self {
-        let mut syntax = syntax;
-        let print_func = Item::Declaration(Declaration::Func(Identifier::FuncDef {
-            name: String::from("print"),
-            value: Func {
-                params: vec![Identifier::FuncParam {
-                    name: String::from("s"),
-                    typ: Some(Type::String),
-                }],
-                body: Expression {
-                    local_vars: vec![],
-                    expression_body: ExpressionBody::Literal(Box::new(Literal {
-                        typ: Type::Unit,
-                        value: TypeValue::Unit,
-                    })),
-                    ret_type: Some(Type::Unit),
-                },
-                ret: Some(Type::Unit),
+        let mut externs = HashMap::new();
+        externs.insert(
+            String::from("print"),
+            ExternFunc {
+                params: vec![None],
+                implementation: None,
+                ret: Type::Unit,
+                call: String::from("println!(\"{:?}\", "),
             },
-        }));
-        syntax.items.insert(0, print_func);
-        Self { syntax }
+        );
+        externs.insert(
+            String::from("int_of_float"),
+            ExternFunc {
+                params: vec![Some(Type::Float)],
+                implementation: Some(String::from(
+                    "pub fn int_of_float(f: f64) -> i64 {f as i64}",
+                )),
+                ret: Type::Int,
+                call: String::from("int_of_float("),
+            },
+        );
+        externs.insert(
+            String::from("float_of_int"),
+            ExternFunc {
+                params: vec![Some(Type::Float)],
+                implementation: Some(String::from(
+                    "pub fn float_of_int(i: i64) -> f64 {i as f64}",
+                )),
+                ret: Type::Float,
+                call: String::from("float_of_int("),
+            },
+        );
+        Self { syntax, externs }
     }
 
     pub fn generate(&self) -> anyhow::Result<String> {
@@ -40,7 +55,7 @@ impl RustGenerator {
             .items
             .iter()
             .map(|item| match item {
-                Item::Declaration(decl) => Self::declaration(&decl),
+                Item::Declaration(decl) => self.declaration(&decl),
             })
             .collect::<anyhow::Result<Vec<String>>>()?
             .join("\n");
@@ -48,10 +63,37 @@ impl RustGenerator {
         Ok(format!("{}\n{}", prepend_stuff, code))
     }
 
-    fn declaration(decl: &Declaration) -> anyhow::Result<String> {
+    fn declaration(&self, decl: &Declaration) -> anyhow::Result<String> {
         match decl {
             Declaration::Func(ident) => match ident {
-                Identifier::FuncDef { name, value } => Self::func(&value, &name),
+                Identifier::FuncDef {
+                    name,
+                    value:
+                        Func {
+                            params: _,
+                            body:
+                                Expression {
+                                    local_vars: _,
+                                    expression_body: ExpressionBody::Extern(ext_typ),
+                                    ret_type: _,
+                                },
+                            ret: _,
+                        },
+                } => {
+                    println!("extern func");
+                    if let Some(ext_func) = self.externs.get(name) {
+                        if let Some(implementation) = &ext_func.implementation {
+                            Ok(implementation.clone())
+                        } else {
+                            Ok(String::new())
+                        }
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "extern function definition but no matching extern function"
+                        ))
+                    }
+                }
+                Identifier::FuncDef { name, value } => self.func(&value, &name),
                 _ => Err(anyhow::anyhow!(
                     "non-function declaration in top level binding"
                 )),
@@ -59,7 +101,7 @@ impl RustGenerator {
         }
     }
 
-    fn func(func: &Func, name: &String) -> anyhow::Result<String> {
+    fn func(&self, func: &Func, name: &String) -> anyhow::Result<String> {
         let param_strs = func
             .params
             .iter()
@@ -72,7 +114,7 @@ impl RustGenerator {
                 _ => Err(anyhow::anyhow!("what should be a func param is not.")),
             })
             .collect::<anyhow::Result<Vec<String>>>()?;
-        let body_str = Self::expression(&func.body)?;
+        let body_str = self.expression(&func.body)?;
         let ret_type_str = Self::type_str(
             func.ret
                 .as_ref()
@@ -92,13 +134,13 @@ impl RustGenerator {
         ))
     }
 
-    fn expression(expr: &Expression) -> anyhow::Result<String> {
+    fn expression(&self, expr: &Expression) -> anyhow::Result<String> {
         let vars = expr
             .local_vars
             .iter()
             .map(|ident| match ident {
                 Identifier::VarDef { name, value } => {
-                    let val_expr = Self::expression(value)?;
+                    let val_expr = self.expression(value)?;
                     Ok(format!("let {} = {};", name, val_expr))
                 }
                 _ => Err(anyhow::anyhow!(
@@ -109,7 +151,7 @@ impl RustGenerator {
 
         let vars_amount = vars.len();
 
-        let expr_body = Self::expression_body(&expr.expression_body)?;
+        let expr_body = self.expression_body(&expr.expression_body)?;
 
         let mut expr_string = if vars_amount > 0 {
             String::from("{")
@@ -130,7 +172,7 @@ impl RustGenerator {
         Ok(expr_string)
     }
 
-    fn expression_body(expr_body: &ExpressionBody) -> anyhow::Result<String> {
+    fn expression_body(&self, expr_body: &ExpressionBody) -> anyhow::Result<String> {
         match expr_body {
             ExpressionBody::Literal(l) => Ok(match &l.value {
                 TypeValue::Int(i) => format!("{}_i64", i.to_string()),
@@ -143,18 +185,28 @@ impl RustGenerator {
                 FuncCall::IdentCall { name, params } => {
                     let fc_params = params
                         .iter()
-                        .map(|p| Self::expression(p))
+                        .map(|p| self.expression(p))
                         .collect::<anyhow::Result<Vec<String>>>()?;
 
-                    match name.as_str() {
-                        "print" => Ok(format!("println!(\"{{:?}}\", ({}))", fc_params.join(", "))),
-                        _ => Ok(format!("{}({})", name, fc_params.join(", "))),
+                    let param_types: Vec<Option<Type>> =
+                        params.iter().map(|p| p.ret_type.clone()).collect();
+
+                    if let Some(ext_func) = self.externs.get(name) {
+                        if ext_func.params.len() == param_types.len() {
+                            Ok(format!("{}{})", ext_func.call, fc_params.join(",")))
+                        } else {
+                            Err(anyhow::anyhow!(
+                                "external function params do not match function call"
+                            ))
+                        }
+                    } else {
+                        Ok(format!("{}({})", name, fc_params.join(", ")))
                     }
                 }
                 FuncCall::AnonCall { params, func } => {
                     let fc_params = params
                         .iter()
-                        .map(|p| Self::expression(p))
+                        .map(|p| self.expression(p))
                         .collect::<anyhow::Result<Vec<String>>>()?;
 
                     match func {
@@ -163,7 +215,7 @@ impl RustGenerator {
                             expression_body,
                             ret_type: Some(Type::Func { params, ret }),
                         } => {
-                            let expr_str = Self::expression(&func)?;
+                            let expr_str = self.expression(&func)?;
                             Ok(format!("{{ {}({}) }}", expr_str, fc_params.join(", ")))
                         }
                         _ => Err(anyhow::anyhow!(
@@ -188,37 +240,37 @@ impl RustGenerator {
             },
             ExpressionBody::Operation(op) => match op.as_ref() {
                 Operation::Eq { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) == ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Bigger { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) > ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Smaller { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) < ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::BiggerEq { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) >= ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::SmallerEq { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) <= ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Not { expr } => {
-                    let expr_str = Self::expression(expr)?;
+                    let expr_str = self.expression(expr)?;
                     Ok(format!("{{ !({}) }}", expr_str))
                 }
                 Operation::Add { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     match (&lhs.ret_type, &rhs.ret_type) {
                         (Some(Type::String), Some(Type::String)) => {
                             Ok(format!("format!(\"{{}}{{}}\", {}, {})", lhs_str, rhs_str))
@@ -233,25 +285,25 @@ impl RustGenerator {
                     }
                 }
                 Operation::Sub { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) - ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Mul { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) * ({}) }}", lhs_str, rhs_str))
                 }
                 Operation::Div { lhs, rhs } => {
-                    let lhs_str = Self::expression(lhs)?;
-                    let rhs_str = Self::expression(rhs)?;
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) / ({}) }}", lhs_str, rhs_str))
                 }
             },
             ExpressionBody::Conditional(cd) => {
-                let cond_str = Self::expression(&cd.cond)?;
-                let then_str = Self::expression(&cd.then)?;
-                let else_str = Self::expression(&cd.els)?;
+                let cond_str = self.expression(&cd.cond)?;
+                let then_str = self.expression(&cd.then)?;
+                let else_str = self.expression(&cd.els)?;
                 Ok(format!(
                     "{{ if {} {{ {} }} else {{ {} }} }}",
                     cond_str, then_str, else_str
@@ -260,7 +312,7 @@ impl RustGenerator {
             ExpressionBody::List(lst) => {
                 let expr_strings = lst
                     .iter()
-                    .map(|expr| Self::expression(expr))
+                    .map(|expr| self.expression(expr))
                     .collect::<anyhow::Result<Vec<String>>>()?;
 
                 let exprs_str = expr_strings.join(",\n");
@@ -282,7 +334,7 @@ impl RustGenerator {
                         _ => Err(anyhow::anyhow!("what should be a func param is not.")),
                     })
                     .collect::<anyhow::Result<Vec<String>>>()?;
-                let body_str = Self::expression(&func.body)?;
+                let body_str = self.expression(&func.body)?;
                 let ret_type_str = Self::type_str(
                     func.ret
                         .as_ref()
@@ -296,7 +348,10 @@ impl RustGenerator {
                     body_str,
                 ))
             }
-            ExpressionBody::Expression(expr) => Self::expression(expr),
+            ExpressionBody::Extern(typ) => {
+                todo!()
+            }
+            ExpressionBody::Expression(expr) => self.expression(expr),
         }
     }
 
@@ -318,4 +373,12 @@ impl RustGenerator {
             }
         })
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternFunc {
+    pub(crate) params: Vec<Option<Type>>,
+    pub(crate) implementation: Option<String>,
+    pub(crate) ret: Type,
+    pub(crate) call: String,
 }

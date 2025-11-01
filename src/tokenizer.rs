@@ -117,6 +117,7 @@ pub enum Keyword {
     If,
     Then,
     Else,
+    Extern,
 }
 
 impl Keyword {
@@ -130,6 +131,7 @@ impl Keyword {
             "if" => Self::If,
             "then" => Self::Then,
             "else" => Self::Else,
+            "extern" => Self::Extern,
             _ => return None,
         })
     }
