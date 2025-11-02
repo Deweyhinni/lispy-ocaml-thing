@@ -80,7 +80,6 @@ impl RustGenerator {
                             ret: _,
                         },
                 } => {
-                    println!("extern func");
                     if let Some(ext_func) = self.externs.get(name) {
                         if let Some(implementation) = &ext_func.implementation {
                             Ok(implementation.clone())
@@ -177,6 +176,7 @@ impl RustGenerator {
             ExpressionBody::Literal(l) => Ok(match &l.value {
                 TypeValue::Int(i) => format!("{}_i64", i.to_string()),
                 TypeValue::Float(f) => format!("{}_f64", f.to_string()),
+                TypeValue::Char(c) => format!("'{}'", c.to_string()),
                 TypeValue::String(s) => format!("String::from(\"{}\")", s),
                 TypeValue::Bool(b) => format!("{}", b.to_string()),
                 TypeValue::Unit => String::from("()"),
@@ -225,11 +225,11 @@ impl RustGenerator {
                 }
             },
             ExpressionBody::VarRef(VarRef { name, typ }) => match typ {
-                Some(Type::Int) | Some(Type::Float) | Some(Type::Bool) => {
+                Some(Type::Int) | Some(Type::Float) | Some(Type::Bool) | Some(Type::Char) => {
                     Ok(format!("{{ {} }}", name))
                 }
                 Some(Type::String) => Ok(format!("{{ {name}.clone() }}")),
-                Some(Type::List(list_type)) => Ok(format!("{{ Rc::clone(&{}) }}", name)),
+                Some(Type::List(_list_type)) => Ok(format!("{{ Rc::clone(&{}) }}", name)),
                 Some(Type::Func { params, ret }) => {
                     todo!()
                 }
@@ -360,6 +360,7 @@ impl RustGenerator {
             Type::Int => String::from("i64"),
             Type::Float => String::from("f64"),
             Type::Bool => String::from("bool"),
+            Type::Char => String::from("char"),
             Type::String => String::from("String"),
             Type::Unit => String::from("()"),
             Type::List(t) => format!("Rc<Vec<{}>>", Self::type_str(t)?),

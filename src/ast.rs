@@ -566,6 +566,7 @@ impl ExpressionBody {
                 let typ = lit.typ.clone();
                 Ok((Self::Literal(Box::new(lit)), Some(typ)))
             }
+            Token::Keyword(Keyword::Extern) => Ok((Self::Extern(Type::Unit), Some(Type::Unit))),
             Token::Identifier(ident) => Ok({
                 let refd_ident = idents.iter().find_map(|id| match id {
                     Identifier::FuncDef {
@@ -656,7 +657,7 @@ impl ExpressionBody {
                 if let Some(func) = idents.iter().find_map(|id| match id {
                     Identifier::FuncDef { name, value } => {
                         if name == ident {
-                            Some(value)
+                            Some(value.clone())
                         } else {
                             None
                         }
@@ -665,13 +666,44 @@ impl ExpressionBody {
                         name,
                         value:
                             Expression {
-                                local_vars,
+                                local_vars: _,
                                 expression_body: ExpressionBody::Func(f),
                                 ret_type,
                             },
                     } => {
                         if name == ident {
-                            Some(f)
+                            Some(*f.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    Identifier::FuncParam {
+                        name,
+                        typ: Some(Type::Func { params, ret }),
+                    } => {
+                        if name == ident {
+                            Some(Func {
+                                params: params
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, p)| Identifier::FuncParam {
+                                        name: format!("param_{}", i),
+                                        typ: Some(*p.clone()),
+                                    })
+                                    .collect(),
+                                body: Expression {
+                                    local_vars: vec![],
+                                    expression_body: ExpressionBody::Literal(Box::new(Literal {
+                                        typ: Type::Unit,
+                                        value: TypeValue::Unit,
+                                    })),
+                                    ret_type: Some(Type::Func {
+                                        params: params.clone(),
+                                        ret: ret.clone(),
+                                    }),
+                                },
+                                ret: Some(*ret.clone()),
+                            })
                         } else {
                             None
                         }
@@ -686,7 +718,7 @@ impl ExpressionBody {
                                     body:
                                         Expression {
                                             local_vars: _,
-                                            expression_body,
+                                            expression_body: _,
                                             ret_type:
                                                 Some(Type::Func {
                                                     params: _,
@@ -746,7 +778,43 @@ impl ExpressionBody {
                     ))
                 }
             }
-            _ => Err(ParseError::NotMatched),
+            _ => match Expression::multiple_from_tokens(tokens, idents) {
+                Ok(exprs) => match &exprs[..] {
+                    [
+                        Expression {
+                            local_vars: _,
+                            expression_body: ExpressionBody::Func(f),
+                            ret_type: Some(Type::Func { params, ret }),
+                        },
+                        rest @ ..,
+                    ] => {
+                        if rest.len() == f.params.len() {
+                            Ok((
+                                Self::FuncCall(Box::new(FuncCall::AnonCall {
+                                    params: rest.to_vec(),
+                                    func: Expression {
+                                        local_vars: vec![],
+                                        expression_body: ExpressionBody::Func(f.clone()),
+                                        ret_type: Some(Type::Func {
+                                            params: params.clone(),
+                                            ret: ret.clone(),
+                                        }),
+                                    },
+                                })),
+                                Some(*ret.clone()),
+                            ))
+                        } else {
+                            Err(ParseError::ParseFailed(format!(
+                                "call params do not match func params in {:?}",
+                                tokens
+                            )))
+                        }
+                    }
+                    _ => Err(ParseError::NotMatched),
+                },
+                Err(ParseError::NotMatched) => Err(ParseError::NotMatched),
+                Err(ParseError::ParseFailed(why)) => Err(ParseError::ParseFailed(why)),
+            },
         }
     }
 
@@ -941,6 +1009,33 @@ pub struct Func {
     pub(crate) ret: Option<Type>,
 }
 
+impl Func {
+    fn func_type(&self) -> Result<Type, ParseError> {
+        let params = self
+            .params
+            .iter()
+            .map(|ident| match ident {
+                Identifier::FuncParam { name: _, typ } => Ok(Box::new(typ.clone().ok_or(
+                    ParseError::ParseFailed(String::from("function param has None type")),
+                )?)),
+                _ => Err(ParseError::ParseFailed(String::from(
+                    "function param has non-param identifier",
+                ))),
+            })
+            .collect::<Result<Vec<Box<Type>>, ParseError>>()?;
+
+        let ret = Box::new(
+            self.ret
+                .clone()
+                .ok_or(ParseError::ParseFailed(String::from(
+                    "function param has None return type",
+                )))?,
+        );
+
+        Ok(Type::Func { params, ret })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Conditional {
     pub(crate) cond: Expression,
@@ -1101,6 +1196,7 @@ impl Operation {
 pub enum Type {
     Int,
     Float,
+    Char,
     String,
     List(Box<Type>),
     Func {
@@ -1113,10 +1209,12 @@ pub enum Type {
 
 impl Type {
     fn from_tokens(tokens: &[Token]) -> Result<Self, ParseError> {
+        println!("tokens: {:?}", tokens);
         match tokens {
             [Token::Identifier(name)] => match name.as_str() {
                 "Int" => Ok(Self::Int),
                 "Float" => Ok(Self::Float),
+                "Char" => Ok(Self::Char),
                 "Bool" => Ok(Self::Bool),
                 "String" => Ok(Self::String),
                 "Unit" => Ok(Self::Unit),
@@ -1124,6 +1222,58 @@ impl Type {
             },
             [Token::LBracket, middle @ .., Token::RBracket] => {
                 Ok(Self::List(Box::new(Self::from_tokens(middle)?)))
+            }
+            [
+                Token::LParen,
+                Token::LBracket,
+                middle @ ..,
+                Token::RBracket,
+                Token::RParen,
+            ] => Ok(Self::List(Box::new(Self::from_tokens(middle)?))),
+            [Token::LParen, .., Token::RParen] => Self::func_type_from_tokens(tokens),
+            _ => Err(ParseError::NotMatched),
+        }
+    }
+
+    fn func_type_from_tokens(tokens: &[Token]) -> Result<Self, ParseError> {
+        match tokens {
+            [Token::LParen, middle @ .., Token::RParen] => {
+                if let Some((in_tokens, arrow_pos)) =
+                    paren_balanced_until_stop(middle, &Token::Arrow)
+                {
+                    let out_tokens = &middle[(arrow_pos + 1)..];
+                    if let Some(param_type_tokens) = split_bodies(&in_tokens) {
+                        let param_types = param_type_tokens
+                            .iter()
+                            .map(|pts| {
+                                Ok(Box::new(match Self::from_tokens(&pts) {
+                                    Ok(t) => t,
+                                    Err(ParseError::NotMatched) => {
+                                        return Err(ParseError::ParseFailed(String::from(
+                                            format!("non-type in type definition: {:?}", pts),
+                                        )));
+                                    }
+                                    Err(ParseError::ParseFailed(why)) => {
+                                        return Err(ParseError::ParseFailed(why));
+                                    }
+                                }))
+                            })
+                            .collect::<Result<Vec<Box<Type>>, ParseError>>()?;
+
+                        let ret_type = Self::from_tokens(out_tokens)?;
+
+                        Ok(Self::Func {
+                            params: param_types,
+                            ret: Box::new(ret_type),
+                        })
+                    } else {
+                        Err(ParseError::ParseFailed(String::from(
+                            "parens not balanced when splitting func type params",
+                        )))
+                    }
+                } else {
+                    Err(ParseError::NotMatched)
+                }
             }
             _ => Err(ParseError::NotMatched),
         }
@@ -1158,6 +1308,10 @@ impl Literal {
                 typ: Type::Float,
                 value: TypeValue::Float(*f),
             },
+            tokenizer::Literal::Char(c) => Self {
+                typ: Type::Char,
+                value: TypeValue::Char(*c),
+            },
             tokenizer::Literal::Bool(b) => Self {
                 typ: Type::Bool,
                 value: TypeValue::Bool(*b),
@@ -1174,6 +1328,7 @@ impl Literal {
 pub enum TypeValue {
     Int(i64),
     Float(f64),
+    Char(char),
     String(String),
     Bool(bool),
     Unit,
@@ -1231,4 +1386,73 @@ fn test_split_with_prefix() {
             vec![':', 'm', 'e', 'o', 'w']
         ]
     );
+}
+
+/// gathers all tokens until a stop token not enclosed by parens
+fn paren_balanced_until_stop(tokens: &[Token], stop: &Token) -> Option<(Vec<Token>, usize)> {
+    let mut parens = 0;
+    let mut out_tokens = Vec::new();
+    let mut stop_pos: i32 = -1;
+
+    for (i, t) in tokens.iter().enumerate() {
+        match t {
+            Token::LParen => {
+                parens += 1;
+                out_tokens.push(t.clone());
+            }
+            Token::RParen => {
+                parens -= 1;
+                out_tokens.push(t.clone());
+            }
+            t => {
+                if t == stop && parens == 0 {
+                    stop_pos = i as i32;
+                    break;
+                } else {
+                    out_tokens.push(t.clone());
+                }
+            }
+        }
+    }
+
+    if stop_pos > -1 {
+        Some((out_tokens, stop_pos as usize))
+    } else {
+        None
+    }
+}
+
+/// splits tokens into bodies either enclosed by parens or single tokens outside parens
+fn split_bodies(tokens: &[Token]) -> Option<Vec<Vec<Token>>> {
+    let mut parens = 0;
+    let mut brackets = 0;
+    let mut bodies = Vec::new();
+    let mut current_body = Vec::new();
+
+    for t in tokens.iter() {
+        match t {
+            Token::LParen => {
+                parens += 1;
+                current_body.push(Token::LParen);
+            }
+            Token::RParen => {
+                parens -= 1;
+                current_body.push(Token::RParen);
+                bodies.push(current_body.clone());
+                current_body.clear();
+                if parens < 0 {
+                    return None;
+                }
+            }
+            t => {
+                if parens == 0 {
+                    bodies.push(vec![t.clone()]);
+                } else {
+                    current_body.push(t.clone());
+                }
+            }
+        }
+    }
+
+    Some(bodies)
 }

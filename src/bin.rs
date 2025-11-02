@@ -75,6 +75,12 @@ pub fn main() {
             in ([a b c])
         )
 
+        (let func_param (f1 : (Int -> Float)) (f2 : ((Int Int -> Int) -> Int)) = (f1 4))
+
+        (let func_param_2 (f1 : (Int -> Float)) (f2 : (Int Int -> Int)) = (f1 (f2 3 2)))
+
+        (let arrow_func_call = ((fn (x : Int) -> (+ x 2)) 4))
+
         (let convert_test = let a = 31.4 in (int_of_float a))
 
         (let () = (print (+ "15 factorial is: " (factorial 15))))

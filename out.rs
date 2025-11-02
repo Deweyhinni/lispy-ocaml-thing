@@ -60,6 +60,9 @@ let c = { Rc::new(vec![7_i64,
 { Rc::new(vec![{ Rc::clone(&a) },
 { Rc::clone(&b) },
 { Rc::clone(&c) }]) }} }
+pub fn func_param(f1: Box<dyn Fn(i64) -> f64>, f2: Box<dyn Fn(Box<dyn Fn(i64, i64) -> i64>) -> i64>) -> f64 { f1(4_i64) }
+pub fn func_param_2(f1: Box<dyn Fn(i64) -> f64>, f2: Box<dyn Fn(i64, i64) -> i64>) -> f64 { f1(f2(3_i64, 2_i64)) }
+pub fn arrow_func_call() -> i64 { { Box::new(move |x: i64| -> i64 { { ({ x }) + (2_i64) } })(4_i64) } }
 pub fn convert_test() -> i64 { {let a = 31.4_f64;
 int_of_float({ a })} }
 pub fn main() -> () { println!("{:?}", format!("{}{}", String::from("15 factorial is: "), factorial(15_i64))) }

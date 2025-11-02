@@ -71,6 +71,9 @@ impl TokenList {
             ['"', middle @ .., '"'] => {
                 tokens.push(Token::Literal(Literal::String(middle.iter().collect())));
             }
+            ['\'', c, '\''] => {
+                tokens.push(Token::Literal(Literal::Char(*c)));
+            }
             ['-', '>'] => {
                 tokens.push(Token::Arrow);
             }
@@ -176,6 +179,7 @@ impl Operator {
 pub enum Literal {
     Int(i64),
     Float(f64),
+    Char(char),
     String(String), // a string enclosed by "quotes"
     Bool(bool),
     Unit, // ()
