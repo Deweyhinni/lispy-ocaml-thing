@@ -8,6 +8,7 @@ use crate::ast::{
 pub struct RustGenerator {
     syntax: SyntaxTree,
     externs: HashMap<String, ExternFunc>,
+    unit_calls: Vec<String>,
 }
 
 impl RustGenerator {
@@ -44,26 +45,40 @@ impl RustGenerator {
                 call: String::from("float_of_int("),
             },
         );
-        Self { syntax, externs }
+        Self {
+            syntax,
+            externs,
+            unit_calls: Vec::new(),
+        }
     }
 
-    pub fn generate(&self) -> anyhow::Result<String> {
+    pub fn generate(&mut self) -> anyhow::Result<String> {
         let prepend_stuff = String::from("#![allow(unused_braces)]\nuse std::rc::Rc;");
 
         let code = self
             .syntax
             .items
+            .clone()
             .iter()
             .map(|item| match item {
                 Item::Declaration(decl) => self.declaration(&decl),
             })
+            .filter(|item| {
+                if let Ok(s) = item {
+                    if s.is_empty() { false } else { true }
+                } else {
+                    true
+                }
+            })
             .collect::<anyhow::Result<Vec<String>>>()?
             .join("\n");
 
-        Ok(format!("{}\n{}", prepend_stuff, code))
+        let append_stuff = format!("pub fn main() -> () {{ {} }}", self.unit_calls.join(";"));
+
+        Ok(format!("{}\n{}\n{}\n", prepend_stuff, code, append_stuff))
     }
 
-    fn declaration(&self, decl: &Declaration) -> anyhow::Result<String> {
+    fn declaration(&mut self, decl: &Declaration) -> anyhow::Result<String> {
         match decl {
             Declaration::Func(ident) => match ident {
                 Identifier::FuncDef {
@@ -100,7 +115,7 @@ impl RustGenerator {
         }
     }
 
-    fn func(&self, func: &Func, name: &String) -> anyhow::Result<String> {
+    fn func(&mut self, func: &Func, name: &String) -> anyhow::Result<String> {
         let param_strs = func
             .params
             .iter()
@@ -120,17 +135,18 @@ impl RustGenerator {
                 .ok_or(anyhow::anyhow!("no return type on function: {:#?}", func))?,
         )?;
 
-        Ok(format!(
-            "pub fn {}({}) -> {} {{ {} }}",
-            if name == &String::from("unit") {
-                &String::from("main")
-            } else {
-                name
-            },
-            param_strs.join(", "),
-            ret_type_str,
-            body_str
-        ))
+        if name == &String::from("unit") {
+            self.unit_calls.push(format!("{{ {} }}", body_str));
+            Ok(String::new())
+        } else {
+            Ok(format!(
+                "pub fn {}({}) -> {} {{ {} }}",
+                name,
+                param_strs.join(", "),
+                ret_type_str,
+                body_str
+            ))
+        }
     }
 
     fn expression(&self, expr: &Expression) -> anyhow::Result<String> {
@@ -298,6 +314,11 @@ impl RustGenerator {
                     let lhs_str = self.expression(lhs)?;
                     let rhs_str = self.expression(rhs)?;
                     Ok(format!("{{ ({}) / ({}) }}", lhs_str, rhs_str))
+                }
+                Operation::Modulo { lhs, rhs } => {
+                    let lhs_str = self.expression(lhs)?;
+                    let rhs_str = self.expression(rhs)?;
+                    Ok(format!("{{ ({}) % ({}) }}", lhs_str, rhs_str))
                 }
             },
             ExpressionBody::Conditional(cd) => {

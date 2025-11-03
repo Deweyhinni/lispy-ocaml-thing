@@ -142,10 +142,11 @@ impl Keyword {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Operator {
-    Add, // +
-    Sub, // -
-    Mul, // *
-    Div, // /
+    Add,    // +
+    Sub,    // -
+    Mul,    // *
+    Div,    // /
+    Modulo, // %
 
     Eq,        // =
     Not,       // !
@@ -164,6 +165,7 @@ impl Operator {
             "-" => Self::Sub,
             "*" => Self::Mul,
             "/" => Self::Div,
+            "%" => Self::Modulo,
             "=" => Self::Eq,
             "!" => Self::Not,
             ">" => Self::Bigger,

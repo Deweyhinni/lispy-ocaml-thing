@@ -533,7 +533,8 @@ impl ExpressionBody {
                 Operation::Add { ref lhs, ref rhs }
                 | Operation::Sub { ref lhs, ref rhs }
                 | Operation::Mul { ref lhs, ref rhs }
-                | Operation::Div { ref lhs, ref rhs } => {
+                | Operation::Div { ref lhs, ref rhs }
+                | Operation::Modulo { ref lhs, ref rhs } => {
                     match (lhs.ret_type.clone(), rhs.ret_type.clone()) {
                         (Some(Type::Int), Some(Type::Int)) => Some(Type::Int),
                         (Some(Type::Float), Some(Type::Float)) => Some(Type::Float),
@@ -1049,6 +1050,7 @@ pub enum Operation {
     Sub { lhs: Expression, rhs: Expression },
     Mul { lhs: Expression, rhs: Expression },
     Div { lhs: Expression, rhs: Expression },
+    Modulo { lhs: Expression, rhs: Expression },
     Eq { lhs: Expression, rhs: Expression },
     Not { expr: Expression },
     Bigger { lhs: Expression, rhs: Expression },
@@ -1098,6 +1100,10 @@ impl Operation {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
                     }),
+                    Operator::Modulo => Ok(Self::Modulo {
+                        lhs: lhs_expr,
+                        rhs: rhs_expr,
+                    }),
                     Operator::Eq => Ok(Self::Eq {
                         lhs: lhs_expr,
                         rhs: rhs_expr,
@@ -1141,6 +1147,10 @@ impl Operation {
                             rhs: expressions[1].clone(),
                         }),
                         Operator::Div => Ok(Self::Div {
+                            lhs: expressions[0].clone(),
+                            rhs: expressions[1].clone(),
+                        }),
+                        Operator::Modulo => Ok(Self::Modulo {
                             lhs: expressions[0].clone(),
                             rhs: expressions[1].clone(),
                         }),

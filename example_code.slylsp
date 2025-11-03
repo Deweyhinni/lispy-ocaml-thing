@@ -1,4 +1,8 @@
-(let meow (s : String) = (print s))
+(let print s = (extern Unit))
+(let int_of_float (f : Float) = (extern Int))
+(let float_of_int (i : Int) = (extern Float))
+
+(let meow (m : String) = (+ m " meow"))
 
 (let meows = (["meow" "mrow" "mjá" "ニャー"]))
 
@@ -6,46 +10,93 @@
 
 (let nums = ([2001 1984 2000 1 0 -1 -154 3 1024]))
 
-(let units = ([() () () ()]))
-
-(let lone_unit = ([()]))
-
-(let idk =
-  let m = (meows)
-  in
-  (print m)
-)
-
-(let add_test = (+ 3 7))
-
-(let float_int_add = let i = 3 let f = 0.14 in (+ i f))
-
-(let arrow_add = (fn (x : Int) -> (fn (y : Int) -> (+ x y))))
-
-(let add3 = (arrow_add 3))
-
-(let list_var = let l = (["hello" "lol"]) in (l))
-
-(let param_types (x : Int) (y : Float) = (+ x y))
-
-(let list_param (l : [[String]]) = (l))
-
-(let conditional (x : Int) (y : Int) = (if (> x y) then x else y))
-
-(let conditional_2 (s1 : String) (s2 : String) = (if (== s1 s2) then "true" else "false"))
-
-(let is_even (x : Float) = (if (== (% x 2.0) (0.0)) then "even" else "odd"))
-
 (let curry_str_concat = (fn (s1 : String) -> (fn (s2 : String) -> (+ s1 s2))))
 
 (let meow_concat = (curry_str_concat "meow"))
 
-(let meow_lol = let lol = "lol" in (meow_concat lol))
+(let meow_lol = (meow_concat "lol"))
 
-(let double_meow_lol = let lol = "lol" in (meow_concat (meow_concat lol)))
+(let always_true = let t = true in (if (= t true) then "true" else "false"))
 
-(let double_lol_meow = let lol = "lol" in (curry_str_concat (lol) (meow_concat lol)))
+(let bigger (x : Int) (y : Int) = (if (> x y) then x else y))
 
-(let str_concat (s1 : String) (s2 : String) = (+ s1 s2))
+(let equals (x : Int) (y : Int) = (if (= x y) then "equal" else "does not equal"))
 
-(let () = (meow "hello"))
+(let kitty = (fn (s : String) -> (+ (+ "kitty says: " s) "!")))
+
+(let factorial (n : Int) = 
+  (if (= n 0) 
+    then 1 
+    else (* n (factorial (- n 1)))))
+
+(
+let func_var = 
+    let add_1 = (fn (x : Int) -> (+ x 1))
+    in (add_1 2)
+)
+
+(let max_of_three (a : Int) (b : Int) (c : Int) = 
+  (if (> a b) then (if (> a c) then a else c) else (if (> b c) then b else c)))
+
+(let var_ref_list = 
+    let a = 10 
+    let b = 15 
+    let c = 20 
+    in ([a b c a b c])
+)
+
+(let string_list =
+    let a = "hello"
+    let b = "there"
+    let c = "lol"
+    in ([a b c])
+)
+
+(let list_list = 
+    let a = ([1 2 3])
+    let b = ([4 5 6])
+    let c = ([7 8 9])
+    in ([a b c])
+)
+
+
+(let fibonacci (n : Int) = 
+  (if (= n 0) 
+    then 0 
+    else (if (= n 1) 
+      then 1 
+      else (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
+
+(let fib_list = ([
+  (fibonacci 0)
+  (fibonacci 1)
+  (fibonacci 2)
+  (fibonacci 3)
+  (fibonacci 4)
+  (fibonacci 5)
+  (fibonacci 6)
+  (fibonacci 7)
+  (fibonacci 8)
+  (fibonacci 9)
+  (fibonacci 10)
+]))
+
+(let func_param (f1 : (Int -> Float)) (f2 : ((Int Int -> Int) -> Int)) = (f1 4))
+
+(let func_param_2 (f1 : (Int -> Float)) (f2 : (Int Int -> Int)) = (f1 (f2 3 2)))
+
+(let func_param_call =
+    (func_param_2 (fn (x : Int) -> (float_of_int x)) (fn (i : Int) (j : Int) -> (+ i j)))
+)
+
+(let arrow_func_call = ((fn (x : Int) -> (+ x 2)) 4))
+
+(let arrow_add = (fn (x : Int) -> (fn (y : Int) -> (+ x y))))
+(let add_3 = (arrow_add 3))
+
+(let convert_test = let a = 31.4 in (int_of_float a))
+
+(let () = (print (+ "3 + 3 = " (add_3 3))))
+(let () = (print fib_list))
+(let () = (print (+ "func param call: " (func_param_call))))
+(let () = (print (+ "15 factorial is: " (factorial 15))))

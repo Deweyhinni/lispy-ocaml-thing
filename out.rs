@@ -1,9 +1,8 @@
 #![allow(unused_braces)]
 use std::rc::Rc;
-
 pub fn int_of_float(f: f64) -> i64 {f as i64}
 pub fn float_of_int(i: i64) -> f64 {i as f64}
-pub fn meow(m: String) -> String { { m.clone() } }
+pub fn meow(m: String) -> String { format!("{}{}", { m.clone() }, String::from(" meow")) }
 pub fn meows() -> Rc<Vec<String>> { { Rc::new(vec![String::from("meow"),
 String::from("mrow"),
 String::from("mjá"),
@@ -60,9 +59,24 @@ let c = { Rc::new(vec![7_i64,
 { Rc::new(vec![{ Rc::clone(&a) },
 { Rc::clone(&b) },
 { Rc::clone(&c) }]) }} }
+pub fn fibonacci(n: i64) -> i64 { { if { ({ n }) == (0_i64) } { 0_i64 } else { { if { ({ n }) == (1_i64) } { 1_i64 } else { { (fibonacci({ ({ n }) - (1_i64) })) + (fibonacci({ ({ n }) - (2_i64) })) } } } } } }
+pub fn fib_list() -> Rc<Vec<i64>> { { Rc::new(vec![fibonacci(0_i64),
+fibonacci(1_i64),
+fibonacci(2_i64),
+fibonacci(3_i64),
+fibonacci(4_i64),
+fibonacci(5_i64),
+fibonacci(6_i64),
+fibonacci(7_i64),
+fibonacci(8_i64),
+fibonacci(9_i64),
+fibonacci(10_i64)]) } }
 pub fn func_param(f1: Box<dyn Fn(i64) -> f64>, f2: Box<dyn Fn(Box<dyn Fn(i64, i64) -> i64>) -> i64>) -> f64 { f1(4_i64) }
 pub fn func_param_2(f1: Box<dyn Fn(i64) -> f64>, f2: Box<dyn Fn(i64, i64) -> i64>) -> f64 { f1(f2(3_i64, 2_i64)) }
+pub fn func_param_call() -> f64 { func_param_2(Box::new(move |x: i64| -> f64 { float_of_int({ x }) }), Box::new(move |i: i64, j: i64| -> i64 { { ({ i }) + ({ j }) } })) }
 pub fn arrow_func_call() -> i64 { { Box::new(move |x: i64| -> i64 { { ({ x }) + (2_i64) } })(4_i64) } }
+pub fn arrow_add() -> Box<dyn Fn(i64) -> Box<dyn Fn(i64) -> i64>> { Box::new(move |x: i64| -> Box<dyn Fn(i64) -> i64> { Box::new(move |y: i64| -> i64 { { ({ x }) + ({ y }) } }) }) }
+pub fn add_3() -> Box<dyn Fn(i64) -> i64> { { arrow_add()(3_i64) } }
 pub fn convert_test() -> i64 { {let a = 31.4_f64;
 int_of_float({ a })} }
-pub fn main() -> () { println!("{:?}", format!("{}{}", String::from("15 factorial is: "), factorial(15_i64))) }
+pub fn main() -> () { { println!("{:?}", format!("{}{}", String::from("3 + 3 = "), { add_3()(3_i64) })) };{ println!("{:?}", fib_list()) };{ println!("{:?}", format!("{}{}", String::from("func param call: "), func_param_call())) };{ println!("{:?}", format!("{}{}", String::from("15 factorial is: "), factorial(15_i64))) } }
