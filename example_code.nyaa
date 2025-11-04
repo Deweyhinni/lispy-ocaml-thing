@@ -45,7 +45,7 @@ let func_var =
     in ([a b c a b c])
 )
 
-(let string_list =
+(let string_list = 
     let a = "hello"
     let b = "there"
     let c = "lol"
